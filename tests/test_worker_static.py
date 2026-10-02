@@ -104,6 +104,48 @@ def test_pull_and_job_import_heavy_modules_only_inside_functions(name):
             assert m.split(".")[0] not in {"torch", "monai"} and not m.startswith("radar_worker.infer"), (name, m)
 
 
+def _top_level_imports(path: Path) -> list[str]:
+    """Module names imported at module level (not inside functions), with `from x import y` as x and x.y."""
+    mods = []
+    for node in ast.parse(path.read_text(encoding="utf-8")).body:
+        if isinstance(node, ast.Import):
+            mods += [a.name for a in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            mods += [node.module or ""] + [f"{node.module}.{a.name}" for a in node.names]
+    return mods
+
+
+def test_serverless_and_volume_are_parsed_as_python_310():
+    names = {p.name for p in PY310_FILES}
+    assert {"serverless.py", "volume.py"} <= names
+
+
+@pytest.mark.parametrize("name", ["serverless.py", "volume.py"])
+def test_serverless_and_volume_never_import_the_api_package(name):
+    assert not any(n == "radar_desk" or n.startswith("radar_desk.") for n in _imports(WORKER / "radar_worker" / name))
+
+
+def test_serverless_imports_runpod_and_torch_only_inside_functions():
+    path = WORKER / "radar_worker" / "serverless.py"
+    for m in _top_level_imports(path):
+        assert m.split(".")[0] not in {"runpod", "torch", "monai"} and not m.startswith("radar_worker.infer"), m
+    assert "runpod" in _imports(path)  # main() imports it
+
+
+def test_volume_imports_only_stdlib_job_and_io():
+    for m in _imports(WORKER / "radar_worker" / "volume.py"):
+        assert m.split(".")[0] in sys.stdlib_module_names or m in {"radar_worker.job", "radar_worker.io"}, m
+
+
+def test_modal_app_takes_the_volume_helpers_from_radar_worker_volume():
+    tree = ast.parse((WORKER / "modal_app.py").read_text(encoding="utf-8"))
+    imported = {a.name for node in tree.body if isinstance(node, ast.ImportFrom) and node.module == "radar_worker.volume"
+                for a in node.names}
+    assert {"ref_kind", "volume_path", "volume_io"} <= imported
+    defined = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
+    assert not defined & {"ref_kind", "volume_path", "volume_io"}
+
+
 @pytest.fixture()
 def no_network(monkeypatch):
     def refuse(*args, **kwargs):

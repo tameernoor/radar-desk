@@ -34,6 +34,7 @@ from radar_worker import job
 from radar_worker.job import ARTEFACTS, ensure_nifti_name, nifti_name  # noqa: F401  kept as public names here
 from radar_worker.job import error_result as _error
 from radar_worker.job import plain as _plain
+from radar_worker.volume import VOLUME_SCHEME, ref_kind, volume_io, volume_path  # noqa: F401
 from radar_worker.weights import check_weights  # shared with scripts/score_local.py
 
 APP_NAME = "radar-desk"
@@ -45,7 +46,6 @@ SMOKE_VOLUME = "radar-smoke"
 SMOKE_DIR = "/smoke"
 DATA_VOLUME = os.environ.get("MODAL_DATA_VOLUME", "radar-data")  # read at deploy time
 DATA_DIR = "/data"
-VOLUME_SCHEME = "volume://"
 
 def parse_gpu(value: str | None):
     """RADAR_GPU as Modal wants it: one name as a string, several as an ordered list."""
@@ -173,70 +173,6 @@ def _source_name(url: str) -> str:
     name = path.rsplit("/", 1)[-1] if "/" in path else ""
     name = re.sub(r"[^A-Za-z0-9._-]", "_", name)
     return name or "source.nii.gz"
-
-
-# ---------------------------------------------------------------- data Volume
-
-
-def ref_kind(source_ref: str, artefact_refs: dict):
-    """"volume" when every reference is volume://, "url" when none is, None when they are mixed."""
-    on_volume = [r.startswith(VOLUME_SCHEME) for r in [source_ref, *artefact_refs.values()]]
-    if all(on_volume):
-        return "volume"
-    return "url" if not any(on_volume) else None
-
-
-def volume_path(ref: str, root) -> Path:
-    """Where volume://<key> sits under the mount; the key rules match the API's validate_key."""
-    if not ref.startswith(VOLUME_SCHEME):
-        raise ValueError(f"not a volume reference: {ref!r}")
-    key = ref[len(VOLUME_SCHEME):]
-    if (not key or key.startswith("/") or "\\" in key or any(ord(c) < 32 or ord(c) == 127 for c in key)
-            or any(part in ("", ".", "..") for part in key.split("/"))):
-        raise ValueError(f"bad volume key: {key!r}")
-    return Path(root) / key
-
-
-def volume_io(source_ref: str, artefact_refs: dict, root, commit):
-    """fetch and publish for run_job when the scan and the artefacts live on the data Volume.
-
-    The caller reloads the Volume before anything on it is opened (a reload fails while files
-    are open, ref_Volume.md lines 23-24 and 371). Keys are written once; an existing artefact is
-    refused, never overwritten (concurrent writes to one file are last write wins, lines 16-18).
-    `commit` runs once after the fifth artefact and before the call returns (lines 355-358).
-    Background commits and the shutdown commit can persist some artefacts earlier (guide_volumes.md
-    lines 258-264), so this is no all-or-nothing write. The guarantee is that the poller reads the
-    artefacts only after FunctionCall.get returns, and by then commit() has run.
-    """
-    from radar_worker.io import TransferError
-
-    written = []
-
-    def fetch(work: Path, log) -> Path:
-        src = volume_path(source_ref, root)
-        if not src.is_file():
-            raise TransferError(404, "no such object on the data Volume", source_ref)
-        name = nifti_name(src)
-        if name == src.name:
-            return src  # read in place; run_job's ensure_nifti_name then leaves it alone
-        dest = Path(work) / name  # never rename on the Volume
-        shutil.copyfile(src, dest)
-        return dest
-
-    def publish(name: str, path: Path, content_type: str) -> None:
-        ref = artefact_refs[name]
-        dest = volume_path(ref, root)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            with open(path, "rb") as fin, open(dest, "xb") as fout:
-                shutil.copyfileobj(fin, fout, 1 << 20)
-        except FileExistsError:
-            raise TransferError(409, "the object already exists; objects are never overwritten", ref) from None
-        written.append(name)
-        if len(written) == len(ARTEFACTS):
-            commit()
-
-    return fetch, publish
 
 
 # ---------------------------------------------------------------- functions

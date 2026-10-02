@@ -20,9 +20,11 @@ test("compute: the fake backend cannot be switched", async ({ page }) => {
   const section = page.getByRole("region", { name: "Compute" });
   await expect(section.getByText("The fake backend is chosen at start-up.")).toBeVisible();
   const radios = section.getByRole("radio");
-  await expect(radios).toHaveCount(2);
+  await expect(radios).toHaveCount(3);
   await expect(radios.nth(0)).toBeDisabled();
   await expect(radios.nth(1)).toBeDisabled();
+  await expect(radios.nth(2)).toBeDisabled();
+  await expect(section.locator("label").nth(2)).toHaveText("RunPod serverless (needs RUNPOD_ENDPOINT_ID)");
   await expect(section.locator("#compute-line")).toHaveText(/^Fake backend/);
   await expect(section.getByRole("button", { name: "Start now" })).toBeHidden();
   await expect(section.getByRole("button", { name: "Stop now" })).toBeHidden();

@@ -30,6 +30,11 @@ class ConfigError(RuntimeError):
     """A required setting is missing or invalid. The message names the variable."""
 
 
+def _pools(value: str) -> list[str]:
+    """RUNPOD_SERVERLESS_GPUS as an ordered list: split on commas, stripped, empties and repeats dropped."""
+    return list(dict.fromkeys(p.strip() for p in value.split(",") if p.strip()))
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -45,7 +50,7 @@ class Settings(BaseSettings):
     data_dir: Path = Path("./data")
 
     # None means s3 when S3_BUCKET is set, else local; see storage.storage_backend
-    storage_backend: Literal["local", "s3", "modal_volume"] | None = None
+    storage_backend: Literal["local", "s3", "modal_volume", "runpod_volume"] | None = None
     modal_data_volume: str = "radar-data"
 
     s3_bucket: str | None = None
@@ -54,7 +59,7 @@ class Settings(BaseSettings):
     aws_access_key_id: SecretStr | None = None
     aws_secret_access_key: SecretStr | None = None
 
-    gpu_backend: Literal["fake", "modal", "worker"] = "fake"
+    gpu_backend: Literal["fake", "modal", "worker", "serverless"] = "fake"
     modal_token_id: SecretStr | None = None
     modal_token_secret: SecretStr | None = None
     modal_app_name: str = "radar-desk"
@@ -81,6 +86,16 @@ class Settings(BaseSettings):
     radar_pod_idle_delete_s: float = Field(default=600, ge=1)  # passed to the pod, which deletes itself
     radar_pod_app_lost_delete_s: float = Field(default=600, ge=1)  # passed to the pod, likewise
 
+    # RunPod Serverless endpoint and the volume's S3 API (plan.md, RunPod Serverless)
+    runpod_endpoint_id: str | None = None
+    runpod_s3_access_key_id: SecretStr | None = None
+    runpod_s3_secret_access_key: SecretStr | None = None
+    runpod_serverless_gpus: str = "AMPERE_24,ADA_24"  # pool ids, comma separated
+    runpod_serverless_price_usd_per_s: float = 0.00031  # the dearer listed pool (ADA_24)
+    runpod_serverless_idle_s: int = Field(default=60, ge=1, le=3600)
+    runpod_serverless_visibility_s: float = 60
+    runpod_serverless_queue_warn_s: float = 300
+
     llm_api_key: SecretStr | None = None
     llm_provider: Literal["openrouter", "ollama", "openai"] | None = None  # None means inferred from the URL
     llm_base_url: str | None = None  # None means the provider's default
@@ -92,6 +107,13 @@ class Settings(BaseSettings):
     @classmethod
     def _gpus_usable(cls, value: str) -> str:
         parse_gpus(value, warn=True)  # the one place an unknown id is logged
+        return value
+
+    @field_validator("runpod_serverless_gpus")
+    @classmethod
+    def _pools_named(cls, value: str) -> str:
+        if not _pools(value):
+            raise ValueError("RUNPOD_SERVERLESS_GPUS names no pool")
         return value
 
     @model_validator(mode="after")
@@ -112,6 +134,16 @@ class Settings(BaseSettings):
         """Whether the app can start pods: the API key, volume, registry auth and image are all set."""
         return bool(self.runpod_api_key and self.runpod_volume_id and self.runpod_registry_auth_id
                     and self.worker_image)
+
+    @property
+    def serverless_configured(self) -> bool:
+        """Whether the app can submit to the serverless endpoint: the API key and the endpoint id are set."""
+        return bool(self.runpod_api_key and self.runpod_endpoint_id)
+
+    @property
+    def runpod_serverless_gpu_list(self) -> list[str]:
+        """RUNPOD_SERVERLESS_GPUS as an ordered list of pool ids, so "ADA_24,AMPERE_24" keeps that order."""
+        return _pools(self.runpod_serverless_gpus)
 
     @property
     def gpu_list(self) -> list[str]:

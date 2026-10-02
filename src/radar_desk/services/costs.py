@@ -1,7 +1,9 @@
 """GPU cost estimates and the monthly budget check.
 
 An attempt costs its run seconds plus the idle window, times the per-second price of the GPU type.
-Every attempt of a job adds to its `cost_estimate_usd`, so retries count toward the budget.
+Every attempt of a job adds to its `cost_estimate_usd`, so retries count toward the budget. A serverless job
+is priced at RUNPOD_SERVERLESS_PRICE_USD_PER_S, the dearest pool the endpoint lists, since RunPod does not
+say which pool ran it.
 """
 
 from __future__ import annotations
@@ -23,6 +25,13 @@ _DEVICE_TYPES = [
     ("L4", "L4"),
     ("T4", "T4"),
 ]
+
+
+def job_backend(job: Job) -> str:
+    """The backend a job ran on. An older row without one is read from its call id."""
+    if job.backend:
+        return job.backend
+    return "worker" if (job.modal_call_id or "").startswith("wk_") else "modal"
 
 
 def gpu_type_from_device(device: str | None) -> str | None:
@@ -61,16 +70,20 @@ def estimate(
     return (seconds + settings.gpu_scaledown_window_s) * price_per_s(gpu, settings)
 
 
-def worst_case(settings: Any) -> float:
+def worst_case(settings: Any, backend: str = "modal") -> float:
     """One job at its limit: two attempts at the timeout plus the idle window, on the dearest requested
-    type, since Modal may run a fallback."""
+    type, since Modal may run a fallback. On serverless, RunPod's retry and the endpoint's idle timeout at
+    the pool price."""
+    if backend == "serverless":
+        return ((2 * settings.gpu_timeout_s + settings.runpod_serverless_idle_s)
+                * settings.runpod_serverless_price_usd_per_s)
     seconds = 2 * settings.gpu_timeout_s + settings.gpu_scaledown_window_s
     price = max((price_per_s(g, settings) for g in settings.gpu_list), default=price_per_s(None, settings))
     return seconds * price
 
 
-def budget_allows(month_sum: float, settings: Any, in_flight: float = 0.0) -> bool:
-    return month_sum + in_flight + worst_case(settings) <= settings.gpu_monthly_budget_usd
+def budget_allows(month_sum: float, settings: Any, in_flight: float = 0.0, backend: str = "modal") -> bool:
+    return month_sum + in_flight + worst_case(settings, backend) <= settings.gpu_monthly_budget_usd
 
 
 def month_of(ts: float) -> str:
@@ -96,21 +109,36 @@ class CostService:
         return self.db.sum_cost_for_month(month) + self.db.pods_cost_for_month(month, now)
 
     def in_flight(self) -> float:
-        """A worst case per submitted job, whose current attempt has no stored cost yet."""
-        return worst_case(self.settings) * len(self.db.list_jobs(state="submitted", limit=100_000))
+        """A worst case per submitted job, on its backend, whose current attempt has no stored cost yet."""
+        return sum(worst_case(self.settings, job_backend(j))
+                   for j in self.db.list_jobs(state="submitted", limit=100_000))
 
-    def budget_allows_now(self, now: float) -> bool:
-        return budget_allows(self.spend_for_month(month_of(now), now), self.settings, self.in_flight())
+    def budget_allows_now(self, now: float, backend: str = "modal") -> bool:
+        return budget_allows(self.spend_for_month(month_of(now), now), self.settings, self.in_flight(), backend)
 
     def attempt_cost(self, job: Job, timings: Timings | dict | None, gpu: str | None, now: float) -> float:
         elapsed = now - parse_iso(job.submitted_at) if job.submitted_at else None
+        if job_backend(job) == "serverless":
+            return self._serverless_cost(timings, elapsed)
         return estimate(timings, gpu or (job.gpu_requested[0] if job.gpu_requested else None),
                         self.settings, elapsed_s=elapsed)
+
+    def _serverless_cost(self, timings: Timings | dict | None, elapsed: float | None) -> float:
+        """The larger of the handler's total_s and RunPod's executionTime, plus the idle timeout, at the pool
+        price. The elapsed time since submit counts only when no result came back (a cancel), because it
+        includes the unbilled time in the queue."""
+        t = timings.model_dump() if isinstance(timings, Timings) else (timings or {})
+        found = [float(v) for v in (t.get("total_s"), t.get("runpod_execution_s"))
+                 if isinstance(v, int | float) and not isinstance(v, bool)]
+        seconds = max(found) if found else (elapsed or 0.0)
+        s = self.settings
+        return (seconds + s.runpod_serverless_idle_s) * s.runpod_serverless_price_usd_per_s
 
     def gpu_status(self, backend_name: str, now: float, compute_mode: str | None = None,
                    pod: dict | None = None) -> dict:
         """The body of GET /gpu/status. `queued` is oldest first with held jobs included; the hourly
-        price is the open pod's, else that of the GPU in use or first requested on modal, else null."""
+        price is the open pod's, else that of the GPU in use or first requested on modal, else the pool price
+        on serverless, else null."""
         month = month_of(now)
         submitted = self.db.list_jobs(state="submitted", limit=100_000)
         queued = self.db.list_jobs(state="queued", limit=100_000)
@@ -121,6 +149,8 @@ class CostService:
         elif backend_name == "modal":
             gpu = (in_flight.gpu_used if in_flight else None) or next(iter(self.settings.gpu_list), None)
             price = round(price_per_s(gpu, self.settings) * 3600, 4)
+        elif backend_name == "serverless":
+            price = round(self.settings.runpod_serverless_price_usd_per_s * 3600, 4)
         return {
             "backend": backend_name,
             "compute_mode": compute_mode or backend_name,

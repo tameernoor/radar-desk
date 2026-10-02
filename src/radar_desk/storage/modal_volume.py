@@ -27,6 +27,7 @@ VOLUME_SCHEME = "volume://"
 
 class ModalVolumeStorage:
     name = "modal_volume"
+    browser_via_api = True  # app.py mounts routes/volume_storage.py
 
     def __init__(self, volume_name: str, public_base_url: str, volume: Any = None,
                  credentials: tuple[str, str] | None = None) -> None:

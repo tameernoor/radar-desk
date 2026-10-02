@@ -116,7 +116,8 @@ async function load() {
 let compute = null; // the last GET /compute body
 let gpus = []; // the Modal GPUs requested, for the phrase
 
-const modeLabel = (mode) => (mode === "modal" ? "Modal" : compute?.runpod.configured ? "RunPod" : "Worker");
+const modeLabel = (mode) =>
+  mode === "modal" ? "Modal" : mode === "serverless" ? "RunPod serverless" : compute?.runpod?.configured ? "RunPod pod" : "Worker";
 
 async function computeAct(promise) {
   const status = document.getElementById("compute-status");
@@ -145,8 +146,10 @@ function renderCompute(c) {
   }
   for (const input of document.querySelectorAll('input[name="compute-mode"]')) {
     input.checked = input.value === c.mode; // also snaps a radio back while a switch waits for its confirmation
-    input.disabled = !c.changeable;
-    if (!input.dataset.armed) input.parentElement.querySelector("[data-label]").textContent = modeLabel(input.value);
+    const unconfigured = input.value === "serverless" && !c.serverless?.configured;
+    input.disabled = !c.changeable || unconfigured;
+    const label = modeLabel(input.value) + (unconfigured ? " (needs RUNPOD_ENDPOINT_ID)" : "");
+    if (!input.dataset.armed) input.parentElement.querySelector("[data-label]").textContent = label;
   }
   document.getElementById("compute-fixed").hidden = c.changeable;
   document.getElementById("pod-start").hidden = !(c.mode === "worker" && c.runpod.configured && !c.pod);
@@ -158,7 +161,7 @@ function chooseMode(input) {
   const job = compute?.in_flight;
   if (job && !input.dataset.armed) {
     input.dataset.armed = "1";
-    const where = { modal: "Modal", worker: modeLabel("worker"), fake: "the fake backend" }[job.backend] || job.backend;
+    const where = { modal: "Modal", worker: modeLabel("worker"), serverless: "RunPod serverless", fake: "the fake backend" }[job.backend] || job.backend;
     input.parentElement.querySelector("[data-label]").textContent =
       `Switch to ${modeLabel(input.value)}? Job ${shortId(job.job_id)} finishes on ${where}`;
     setTimeout(() => {

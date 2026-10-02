@@ -85,11 +85,84 @@ test("the scans strip's gpu_status maps onto the same phrase", () => {
   expect(computePhrase(s, NOW)).toEqual({ text: "Pod rp123, NVIDIA L4, $0.39/h, up 2:30, scoring name of scan_1", tone: "busy" });
   const idle = fromGpuStatus({ backend: "worker", compute_mode: "worker", runpod_configured: false, gpu_requested: [], pod: null, in_flight: null, queued: [], held: [] });
   expect(computePhrase(idle, NOW).text).toBe("Worker backend, no RunPod keys, workers are started by hand");
+  const sg = (status) => ({
+    backend: "serverless",
+    compute_mode: "serverless",
+    runpod_configured: true,
+    gpu_requested: [],
+    pod: null,
+    in_flight: { id: "job_5555aaaa9", scan_id: "scan_1", backend: "serverless" },
+    queued: [],
+    held: [],
+    serverless: sl(sjob(status), { health }).serverless,
+  });
+  const queued = computePhrase(fromGpuStatus(sg("IN_QUEUE"), (id) => `name of ${id}`), NOW);
+  expect(queued).toEqual({ text: "RunPod serverless, job queued 1:35, waiting for a worker (1 running, 0 idle)", tone: "busy" });
+  const scoring = computePhrase(fromGpuStatus(sg("IN_PROGRESS"), (id) => `name of ${id}`), NOW);
+  expect(scoring).toEqual({ text: "RunPod serverless, scoring name of scan_1, 1:35", tone: "busy" });
 });
 
 test("mode modal with a pod still draining names the pod", () => {
   const g = { backend: "modal", compute_mode: "modal", runpod_configured: true, gpu_requested: ["L4"], pod: pod({ phase: "ready", idle_s: 0 }), in_flight: null, queued: [], held: [] };
   expect(computePhrase(fromGpuStatus(g), NOW)).toEqual({ text: "Pod rp123, NVIDIA L4, $0.39/h, idle 0 min, deletes itself after 10 idle min", tone: "busy" });
+});
+
+const sl = (job, extra) => ({
+  mode: "serverless",
+  in_flight: job ? { job_id: job.job_id, backend: "serverless" } : null,
+  serverless: { configured: true, endpoint_id: "abc123", gpus: ["AMPERE_24", "ADA_24"], idle_s: 60, price_per_s: 0.00031, health: null, job, ...extra },
+});
+const sjob = (status) => ({ job_id: "job_5555aaaa9", status, submitted_at: at(95), status_at: at(5) });
+const health = { workers: { idle: 0, running: 1 }, jobs: { completed: 1, failed: 0, inProgress: 0, inQueue: 1, retried: 0 }, at: at(5) };
+
+test("serverless queued without health", () => {
+  expect(phrase(sl(sjob("IN_QUEUE")))).toEqual({ text: "RunPod serverless, job queued 1:35, waiting for a worker", tone: "busy" });
+});
+
+test("serverless queued with health counts the workers", () => {
+  expect(phrase(sl(sjob("IN_QUEUE"), { health }))).toEqual({
+    text: "RunPod serverless, job queued 1:35, waiting for a worker (1 running, 0 idle)",
+    tone: "busy",
+  });
+});
+
+test("serverless queued with health but no worker counts", () => {
+  const queued = "RunPod serverless, job queued 1:35, waiting for a worker";
+  expect(phrase(sl(sjob("IN_QUEUE"), { health: { ...health, workers: null } })).text).toBe(queued);
+  expect(phrase(sl(sjob("IN_QUEUE"), { health: { ...health, workers: {} } })).text).toBe(`${queued} (0 running, 0 idle)`);
+});
+
+test("serverless scoring names the scan, or the job id without one", () => {
+  expect(phrase({ ...sl(sjob("IN_PROGRESS")), scan: "case-7.nii.gz" })).toEqual({ text: "RunPod serverless, scoring case-7.nii.gz, 1:35", tone: "busy" });
+  expect(phrase(sl(sjob("RUNNING"))).text).toBe("RunPod serverless, scoring job_5555, 1:35");
+});
+
+test("serverless job whose status is not known yet", () => {
+  expect(phrase(sl(sjob(null)))).toEqual({ text: "RunPod serverless, job submitted, status pending", tone: "busy" });
+});
+
+test("serverless job in another status", () => {
+  expect(phrase(sl(sjob("COMPLETED")))).toEqual({ text: "RunPod serverless, job completed, 1:35", tone: "busy" });
+});
+
+test("serverless with nothing submitted scales to zero", () => {
+  expect(phrase(sl(null))).toEqual({ text: "RunPod serverless, AMPERE_24 or ADA_24, scales to zero", tone: "idle" });
+});
+
+test("serverless not configured, or the block missing", () => {
+  const text = "RunPod serverless, not configured (needs RUNPOD_ENDPOINT_ID)";
+  expect(phrase({ mode: "serverless", serverless: { configured: false, job: null, health: null } })).toEqual({ text, tone: "idle" });
+  expect(phrase({ mode: "serverless" })).toEqual({ text, tone: "idle" });
+});
+
+test("a serverless job in flight while the mode is worker gets the generic suffix", () => {
+  const s = { ...sl(sjob("IN_PROGRESS")), mode: "worker", scan: "a.nii" };
+  expect(phrase(s)).toEqual({ text: "RunPod, no pod, starts when a job is queued, scoring a.nii", tone: "busy" });
+});
+
+test("a problem sentence still wins the tone in serverless", () => {
+  const problem = "No worker has started in 5 min; EU-RO-1 stock or a slow image pull. Cancel the job to switch.";
+  expect(phrase({ ...sl(sjob("IN_QUEUE")), problem })).toEqual({ text: `RunPod serverless, job queued 1:35, waiting for a worker. ${problem}`, tone: "problem" });
 });
 
 test("worker URL: managed tunnel of the pod, fixed URL, nothing on modal", () => {

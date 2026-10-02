@@ -98,7 +98,7 @@ function scanName(scanId) {
 function gpuPhrase(g) {
   const queued = scans.filter((s) => s.latest_job?.state === "queued").length;
   const price = g.price_per_hour_usd != null ? ` at $${g.price_per_hour_usd.toFixed(2)}/h` : "";
-  const backend = { fake: "Fake GPU", modal: "Modal" }[g.backend] || g.backend;
+  const backend = { fake: "Fake GPU", modal: "Modal", serverless: "RunPod serverless" }[g.backend] || g.backend;
   const gpu = g.in_flight?.gpu_used || g.gpu_requested.join(" or ");
   const budgetHeld = g.held.find((j) => j.hold_reason === "budget");
   if (budgetHeld) return `Held: monthly GPU budget reached, raise or wait. ${g.held.length} job(s) held.`;
@@ -119,8 +119,8 @@ async function pollGpu() {
   try {
     const g = await get("/gpu/status");
     const spend = `Spent ${usd(g.spend_month_usd)} of ${usd(g.budget_usd)} in ${g.month}.`;
-    // Worker mode, or a pod still draining after a switch, uses the same phrase as the jobs page.
-    const c = g.pod || g.compute_mode === "worker" ? computePhrase(fromGpuStatus(g, scanName), Date.now()) : null;
+    // Worker or serverless mode, or a pod still draining after a switch, uses the same phrase as the jobs page.
+    const c = g.pod || g.compute_mode === "worker" || g.compute_mode === "serverless" ? computePhrase(fromGpuStatus(g, scanName), Date.now()) : null;
     strip.replaceChildren(el("strong", {}, c ? c.text : gpuPhrase(g)), " ", el("span", { class: "muted" }, spend));
     strip.classList.toggle("busy", c ? c.tone === "busy" : Boolean(g.in_flight));
     strip.classList.toggle("held", c ? c.tone === "held" || c.tone === "problem" : g.held.length > 0);

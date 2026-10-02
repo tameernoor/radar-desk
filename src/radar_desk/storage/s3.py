@@ -24,6 +24,7 @@ class S3Storage(UrlWorkerRefs):
         access_key: str | None,
         secret_key: str | None,
         client: Any = None,
+        config: Config | None = None,
     ) -> None:
         self.bucket = bucket
         self.client = client or boto3.client(
@@ -32,7 +33,7 @@ class S3Storage(UrlWorkerRefs):
             region_name=region,
             aws_access_key_id=access_key,
             aws_secret_access_key=secret_key,
-            config=Config(signature_version="s3v4"),
+            config=config or Config(signature_version="s3v4"),
         )
 
     def _params(self, key: str) -> dict[str, str]:
@@ -91,7 +92,12 @@ class S3Storage(UrlWorkerRefs):
             raise StorageError(f"put_object {key}: {exc}") from exc
 
     def delete(self, key: str) -> None:
+        """Deleting a missing object is fine, as in the other adapters; S3 answers 204 but others may 404."""
         try:
             self.client.delete_object(**self._params(key))
-        except (ClientError, BotoCoreError) as exc:
+        except ClientError as exc:
+            if str(exc.response.get("Error", {}).get("Code")) in _MISSING_CODES:
+                return
+            raise StorageError(f"delete_object {key}: {exc}") from exc
+        except BotoCoreError as exc:
             raise StorageError(f"delete_object {key}: {exc}") from exc

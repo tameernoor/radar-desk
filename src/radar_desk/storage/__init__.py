@@ -1,4 +1,5 @@
-"""Object storage: local files, an S3 bucket, or a Modal Volume (STORAGE_BACKEND, design.md Storage and records)."""
+"""Object storage: local files, an S3 bucket, a Modal Volume or a RunPod volume (STORAGE_BACKEND,
+design.md Storage and records)."""
 
 from __future__ import annotations
 
@@ -9,6 +10,7 @@ from radar_desk.config import ConfigError
 from radar_desk.storage.base import ObjectExists, ObjectMissing, Storage, StorageError, validate_key
 from radar_desk.storage.local import LocalStorage
 from radar_desk.storage.modal_volume import ModalVolumeStorage
+from radar_desk.storage.runpod_volume import RunPodVolumeStorage
 from radar_desk.storage.s3 import S3Storage
 
 __all__ = [
@@ -16,6 +18,7 @@ __all__ = [
     "ModalVolumeStorage",
     "ObjectExists",
     "ObjectMissing",
+    "RunPodVolumeStorage",
     "S3Storage",
     "Storage",
     "StorageError",
@@ -45,6 +48,17 @@ def make_storage(settings: Any) -> Storage:
         tid, tsecret = getattr(settings, "modal_token_id", None), getattr(settings, "modal_token_secret", None)
         creds = (_plain(tid), _plain(tsecret)) if tid is not None and tsecret is not None else None
         return ModalVolumeStorage(settings.modal_data_volume, settings.public_base_url, credentials=creds)
+    if backend == "runpod_volume":
+        for name in ("runpod_volume_id", "runpod_s3_access_key_id", "runpod_s3_secret_access_key"):
+            if not getattr(settings, name, None):
+                raise ConfigError(f"STORAGE_BACKEND=runpod_volume needs {name.upper()}")
+        return RunPodVolumeStorage(
+            volume_id=settings.runpod_volume_id,
+            datacenter=settings.runpod_datacenter,
+            access_key=_plain(settings.runpod_s3_access_key_id),
+            secret_key=_plain(settings.runpod_s3_secret_access_key),
+            max_upload_bytes=settings.max_upload_bytes,
+        )
     if backend == "s3":
         if not getattr(settings, "s3_bucket", None):
             raise ConfigError("STORAGE_BACKEND=s3 needs S3_BUCKET")

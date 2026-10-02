@@ -1,4 +1,4 @@
-"""A front end to the app's Compute choice (plan.md, Compute switch, B).
+"""A front end to the app's Compute choice (plan.md, Compute switch, B, and RunPod Serverless).
 
 The app starts and stops the pod and its tunnel itself; this command only calls the owner routes. OWNER_TOKEN
 comes from the environment or `.env` in the working directory (the environment wins) and is never printed.
@@ -54,10 +54,23 @@ def compute_lines(c: dict) -> list[str]:
                      f"${cost}/h, image {pod.get('image') or '?'}, {up}")
     else:
         lines.append("pod: none")
+    serverless = c.get("serverless")
+    if serverless is not None:
+        lines.append(serverless_line(serverless))
     if c.get("problem"):
         lines.append(f"problem: {c['problem']}")
     lines.append(f"spend: ${c['spend_month_usd']:.2f} of ${c['budget_usd']:.2f} in {c['month']}")
     return lines
+
+
+def serverless_line(s: dict) -> str:
+    if not s.get("configured"):
+        return "serverless: not configured"
+    head = f"serverless: endpoint {s.get('endpoint_id')}, {', '.join(s.get('gpus') or [])}"
+    job = s.get("job")
+    if not job:
+        return f"{head}, no job"
+    return f"{head}, job {job['job_id'][:8]} {job.get('status') or 'status pending'} since {job.get('submitted_at')}"
 
 
 def cmd_runpod(desk: Desk, args: argparse.Namespace) -> int:
@@ -71,6 +84,12 @@ def cmd_runpod(desk: Desk, args: argparse.Namespace) -> int:
 
 def cmd_modal(desk: Desk, args: argparse.Namespace) -> int:
     for line in compute_lines(desk.set_mode("modal")):
+        out(line)
+    return 0
+
+
+def cmd_serverless(desk: Desk, args: argparse.Namespace) -> int:
+    for line in compute_lines(desk.set_mode("serverless")):
         out(line)
     return 0
 
@@ -97,18 +116,21 @@ def cmd_status(desk: Desk, args: argparse.Namespace) -> int:
     return 0
 
 
-COMMANDS = {"runpod": cmd_runpod, "modal": cmd_modal, "status": cmd_status, "stop": cmd_stop}
+COMMANDS = {"runpod": cmd_runpod, "modal": cmd_modal, "serverless": cmd_serverless, "status": cmd_status,
+            "stop": cmd_stop}
 
 
 def parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--app", help=f"the app's URL (default {DEFAULT_APP})")
     p = argparse.ArgumentParser(prog="python -m radar_desk.compute",
-                                description="Choose where the app scores: Modal or a RunPod pod.")
+                                description="Choose where the app scores: Modal, a RunPod pod or RunPod serverless.")
     sub = p.add_subparsers(dest="command", required=True)
     r = sub.add_parser("runpod", parents=[common], help="score on RunPod; the app starts a pod when work is queued")
     r.add_argument("--start", action="store_true", help="start the pod now")
     sub.add_parser("modal", parents=[common], help="score on Modal; an idle pod is stopped by the app")
+    sub.add_parser("serverless", parents=[common],
+                   help="score on the RunPod serverless endpoint; an idle pod is stopped by the app")
     sub.add_parser("stop", parents=[common], help="stop the pod now")
     sub.add_parser("status", parents=[common], help="show the app, the Compute choice, the pod and the workers")
     return p
