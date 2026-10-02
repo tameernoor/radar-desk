@@ -43,6 +43,11 @@ const DTYPE_BYTES = { uint8: 1, int8: 1, int16: 2, uint16: 2, int32: 4, uint32: 
 // - Zoom and pan use the public setPan2Dxyzmm (index.ts 3855) and read nv.scene.pan2Dxyzmm back;
 //   yoke3Dto2DZoom (nvdocument.ts 153) makes the 3D render follow. Mouse buttons are mapped with
 //   the public setMouseEventConfig (index.ts 8746) and the DRAG_MODE enum (nvdocument.ts 75-86).
+// - centreOn reads sceneExtentsMinMax(true), index.ts 9947, tagged @internal at 9945 (CoordinateTransform.ts 38-76),
+//   whose first two entries are the scene's min and max in mm. draw2D (index.ts 9683-9692) shows
+//   (extent - pan) / zoom on each in-plane axis, with pan swizzled to the plane, so the view centre is
+//   (c - pan) / zoom with c the middle of the extents. With isSliceMM off (the default) draw2D takes
+//   the CT's ortho extents (index.ts 9637), which equal the mm ones for a scan that is not oblique.
 // - Focus mode resizes the canvas's parent; NiiVue's own ResizeObserver on it (index.ts 921-924)
 //   resizes the canvas. resizeListener (index.ts 1188) is @internal and is not called.
 
@@ -422,6 +427,14 @@ export function createViewer(canvas, { onLocation, onLight, onView } = {}) {
 
     resetView() {
       nv.setPan2Dxyzmm([0, 0, 0, 1]);
+    },
+
+    // Put mm in the middle of every 2D view at the given zoom: pan = c - zoom * mm on each axis.
+    centreOn(mm, zoom) {
+      if (!Number.isFinite(zoom)) throw new Error("Zoom must be a number.");
+      const z = Math.max(ZOOM_RANGE[0], Math.min(ZOOM_RANGE[1], zoom));
+      const [mn, mx] = nv.sceneExtentsMinMax(true);
+      nv.setPan2Dxyzmm([0, 1, 2].map((i) => (mn[i] + mx[i]) / 2 - z * mm[i]).concat(z));
     },
 
     // A plane while in multiplanar picks the main view; otherwise it is the single view.

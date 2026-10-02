@@ -55,31 +55,31 @@
               <button type="button" data-slice="axial" aria-pressed="true">Axial</button>
               <button type="button" data-slice="coronal">Coronal</button>
               <button type="button" data-slice="sagittal">Sagittal</button>
-              <button type="button" data-slice="multiplanar" title="m">Multiplanar</button>
+              <button type="button" data-slice="multiplanar" title="Multiplanar (m)">Multiplanar</button>
               <button type="button" data-slice="render">3D</button>
             </div>
             <div class="btn-group" role="group" aria-label="Window">
-              <button type="button" data-window="soft_tissue" title="1" aria-pressed="true">Soft tissue</button>
-              <button type="button" data-window="liver" title="2">Liver</button>
-              <button type="button" data-window="bone" title="3">Bone</button>
-              <button type="button" data-window="lung" title="4">Lung</button>
+              <button type="button" data-window="soft_tissue" title="Soft tissue window (1)" aria-pressed="true">Soft tissue</button>
+              <button type="button" data-window="liver" title="Liver window (2)">Liver</button>
+              <button type="button" data-window="bone" title="Bone window (3)">Bone</button>
+              <button type="button" data-window="lung" title="Lung window (4)">Lung</button>
+              <button type="button" data-window="angio" title="Angio window (5)">Angio</button>
             </div>
             <div class="btn-group" role="group" aria-label="Mask">
-              <button type="button" id="mask-toggle" data-mask title="space" aria-pressed="true">Mask</button>
-              <label class="inline">Opacity <input type="range" id="mask-opacity" data-mask-opacity min="0" max="100" value="45"></label>
-              <button type="button" id="outline-toggle" data-outline aria-pressed="false">Outline</button>
+              <button type="button" id="mask-toggle" data-mask title="Mask on or off (space)" aria-pressed="true">Mask</button>
               <button type="button" id="box-toggle" aria-pressed="false" title="Where RADAR looked for the selected organ">Scoring box</button>
+              <button type="button" id="view-for" class="muted" title="View for organ">View for organ</button>
               <button type="button" id="show-all" title="Show every organ in the mask">All organs</button>
             </div>
             <div class="btn-group" role="group" aria-label="Zoom">
-              <button type="button" id="zoom-in" title="+" aria-label="Zoom in">+</button>
-              <button type="button" id="zoom-out" title="-" aria-label="Zoom out">-</button>
-              <button type="button" id="view-reset" title="Zoom 1, no pan">Reset view</button>
+              <button type="button" id="zoom-in" title="Zoom in (+)" aria-label="Zoom in">+</button>
+              <button type="button" id="zoom-out" title="Zoom out (-)" aria-label="Zoom out">&minus;</button>
+              <button type="button" id="view-reset" title="Whole slice, no zoom or pan">Reset view</button>
             </div>
-            <div class="btn-group">
-              <button type="button" id="look-button" title="w" aria-controls="look-card">What am I looking at?</button>
+            <div class="btn-group modes">
+              <button type="button" id="look-button" title="What am I looking at? (w)" aria-controls="look-card">What am I looking at?</button>
               <button type="button" id="light-toggle" aria-controls="light-panel" aria-pressed="false" title="Window, gamma, colour map, mask">Light</button>
-              <button type="button" id="focus-toggle" aria-pressed="false" title="f">Focus</button>
+              <button type="button" id="focus-toggle" aria-pressed="false" title="Focus: viewer fills the window (f, Esc to leave)">Focus</button>
             </div>
           </div>
           <div class="viewer-wrap">
@@ -90,17 +90,11 @@
             <section class="light-panel" id="light-panel" aria-label="Light" hidden>
               <header><h2>Light</h2><button type="button" id="light-close">Close</button></header>
               <h3>Window</h3>
-              <div class="btn-group" role="group" aria-label="Window presets">
-                <button type="button" data-window="soft_tissue" title="1">Soft tissue</button>
-                <button type="button" data-window="liver" title="2">Liver</button>
-                <button type="button" data-window="bone" title="3">Bone</button>
-                <button type="button" data-window="lung" title="4">Lung</button>
-              </div>
               <label class="light-row" for="ww">Width <span><output id="ww-value" for="ww">400</output> HU</span></label>
               <input type="range" id="ww" min="0" max="1000" step="1" value="722">
-              <label class="light-row" for="wl">Level <span><output id="wl-value" for="wl">40</output> HU</span></label>
-              <input type="range" id="wl" min="-1200" max="2000" step="1" value="40">
-              <p class="light-range" id="window-range">-160 to 240 HU</p>
+              <label class="light-row" for="wl">Level <span><output id="wl-value" for="wl">50</output> HU</span></label>
+              <input type="range" id="wl" min="-1200" max="2000" step="1" value="50">
+              <p class="light-range" id="window-range">Soft tissue, -150 to 250 HU</p>
               <h3>CT</h3>
               <label class="light-row" for="gamma">Gamma <output id="gamma-value" for="gamma">1.00</output></label>
               <input type="range" id="gamma" min="0.2" max="3" step="0.05" value="1">
@@ -119,9 +113,9 @@
               <div class="light-row">
                 <span class="btn-group">
                   <button type="button" data-mask aria-pressed="true">Mask</button>
-                  <button type="button" data-outline aria-pressed="false">Outline</button>
+                  <button type="button" id="outline-toggle" data-outline aria-pressed="false">Outline</button>
                 </span>
-                <label class="inline">Opacity <input type="range" data-mask-opacity min="0" max="100" value="45"></label>
+                <label class="inline">Opacity <input type="range" id="mask-opacity" data-mask-opacity min="0" max="100" value="45"></label>
               </div>
               <div class="light-actions"><button type="button" id="light-reset" title="Soft tissue, gamma 1, gray, mask on at 45%; zoom stays">Reset</button></div>
             </section>
@@ -131,14 +125,7 @@
             <div class="legend" id="legend" aria-label="Organs in the mask"></div>
             <p class="keys-help">
               <span><kbd>j</kbd> <kbd>k</kbd> next and previous finding</span>
-              <span><kbd>space</kbd> mask</span>
-              <span><kbd>1</kbd> to <kbd>4</kbd> window</span>
               <span><kbd>[</kbd> <kbd>]</kbd> display line</span>
-              <span><kbd>m</kbd> multiplanar</span>
-              <span><kbd>w</kbd> what am I looking at</span>
-              <span><kbd>f</kbd> focus</span>
-              <span><kbd>+</kbd> <kbd>-</kbd> zoom</span>
-              <span><kbd>Esc</kbd> leave focus</span>
               <span>right-drag window, shift-drag or middle-drag pan, ctrl-wheel zoom</span>
             </p>
           </div>

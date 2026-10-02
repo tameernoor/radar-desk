@@ -40,7 +40,7 @@ button, .button {
 }
 button:hover, .button:hover { border-color: var(--muted); }
 button:focus-visible, .button:focus-visible, [tabindex]:focus-visible, input:focus-visible, select:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--text);
   outline-offset: 1px;
 }
 button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
@@ -186,7 +186,10 @@ html:has(.workspace-page), .workspace-page { height: 100%; }
 .viewer-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: #000; }
 .viewer-toolbar { display: flex; flex-wrap: wrap; gap: 0.6rem; padding: 0.35rem 0.6rem; background: var(--panel); border-bottom: 1px solid var(--line); }
 .btn-group { display: flex; gap: 0.2rem; align-items: center; }
-.btn-group button { font-size: 0.8rem; padding: 0.15rem 0.45rem; }
+.btn-group button { font-size: 0.8rem; padding: 0.15rem 0.35rem; }
+.viewer-toolbar .modes { margin-left: auto; }
+/* A fixed width, so the toolbar does not reflow when the organ name changes. */
+#view-for { width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .inline { display: inline-flex; gap: 0.3rem; align-items: center; font-size: 0.8rem; color: var(--muted); }
 .inline input { width: 5rem; }
 .viewer-wrap { position: relative; flex: 1; min-height: 0; }
@@ -242,7 +245,7 @@ kbd { font: 0.7rem var(--mono); padding: 0 0.3rem; border: 1px solid var(--line)
 .light-row { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-top: 0.35rem; color: var(--muted); }
 .light-row output { color: var(--text); font-family: var(--mono); }
 .light-row > button { font-size: 0.8rem; padding: 0.15rem 0.45rem; }
-.light-range { margin: 0.2rem 0 0; font-family: var(--mono); color: var(--accent); }
+.light-range { margin: 0.2rem 0 0; font-family: var(--mono); color: var(--text); }
 .light-actions { margin-top: 0.8rem; padding-top: 0.5rem; border-top: 1px solid var(--line); }
 .light-actions button { font-size: 0.8rem; padding: 0.15rem 0.45rem; }
 /* With both open, the look card sits left of the light panel. */
@@ -258,6 +261,7 @@ body.focus .viewer-wrap { position: absolute; inset: 0; }
 body.focus .viewer-toolbar, body.focus .viewer-bottom { position: absolute; left: 0; right: 0; z-index: 3; background: rgb(27 30 35 / 0.88); }
 body.focus .viewer-toolbar { top: 0; }
 body.focus .viewer-bottom { bottom: 0; }
+body.focus .keys-help { display: none; }
 body.focus .look-card, body.focus .light-panel {
   top: calc(var(--toolbar-h, 2.5rem) + 0.6rem); max-height: calc(100% - var(--toolbar-h, 2.5rem) - var(--bottom-h, 4rem) - 1.2rem);
 }
