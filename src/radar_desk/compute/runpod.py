@@ -5,6 +5,7 @@ Every request carries a named User-Agent; RunPod answers a default Python one wi
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -14,8 +15,20 @@ import httpx
 
 GRAPHQL_URL = "https://api.runpod.io/graphql"
 REST_URL = "https://rest.runpod.io/v1"
-# The image's torch 2.5.1/cu124 cannot drive Blackwell parts (RTX PRO, B200, RTX 5090); never list one.
-GPU_PREFERENCE = ("NVIDIA L4", "NVIDIA GeForce RTX 4090")
+DEFAULT_GPUS = "NVIDIA L4,NVIDIA GeForce RTX 4090"
+GPU_PREFERENCE = tuple(DEFAULT_GPUS.split(","))
+# The image's torch 2.5.1/cu124 cannot drive Blackwell parts; parse_gpus refuses any id holding one of these,
+# matched with the spaces removed (so "RTX PRO 6000", "RTX5090" and "GB200" all count). "rtxpro" is the whole
+# RTX PRO family; no Ada, Ampere or Hopper id contains it, and "RTX 5000 Ada" does not match any "rtx50x0".
+BLACKWELL = ("blackwell", "rtxpro", "pro6000", "b200", "b300", "rtx5090", "rtx5080", "rtx5070", "rtx5060")
+# RunPod ids the image is known or expected to run on. The list is from memory of RunPod's ids and only
+# drives a warning; RunPod itself decides whether an id exists.
+KNOWN_GPUS = frozenset({
+    "NVIDIA L4", "NVIDIA GeForce RTX 4090", "NVIDIA GeForce RTX 3090", "NVIDIA RTX A4000", "NVIDIA RTX A4500",
+    "NVIDIA RTX A5000", "NVIDIA RTX A6000", "NVIDIA A40", "NVIDIA L40", "NVIDIA L40S",
+    "NVIDIA RTX 4000 Ada Generation", "NVIDIA RTX 6000 Ada Generation", "NVIDIA A100 80GB PCIe",
+    "NVIDIA A100-SXM4-80GB", "NVIDIA H100 PCIe", "NVIDIA H100 80GB HBM3",
+})
 STOCK_MESSAGES = ("SUPPLY_CONSTRAINT", "no longer any instances available")
 
 try:
@@ -29,6 +42,29 @@ DEPLOY = """mutation($input: PodFindAndDeployOnDemandInput!) {
 }"""
 MYSELF = """query { myself { currentSpendPerHr pods { id name imageName desiredStatus costPerHr
   runtime { uptimeInSeconds } machine { gpuDisplayName } } } }"""
+
+
+log = logging.getLogger(__name__)
+
+
+def parse_gpus(value: str, warn: bool = False) -> list[str]:
+    """RUNPOD_GPUS as an ordered list without duplicates. Refuses an empty list and any Blackwell part.
+
+    With `warn`, an id outside KNOWN_GPUS is logged; the settings do that once at load, not on every read.
+    """
+    gpus: list[str] = []
+    for name in (g.strip() for g in value.split(",")):
+        if name and name not in gpus:
+            gpus.append(name)
+    if not gpus:
+        raise ValueError("RUNPOD_GPUS names no GPU type")
+    for name in gpus:
+        if any(b in "".join(name.lower().split()) for b in BLACKWELL):
+            raise ValueError(f"RUNPOD_GPUS: {name} is a Blackwell part; "
+                             "the worker image's torch 2.5.1/cu124 cannot drive it")
+        if warn and name not in KNOWN_GPUS:
+            log.warning("RUNPOD_GPUS: %s is not a GPU type this app knows; RunPod decides whether it exists", name)
+    return gpus
 
 
 class RunPodError(RuntimeError):

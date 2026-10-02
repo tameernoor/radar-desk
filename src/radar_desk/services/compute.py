@@ -209,7 +209,8 @@ class ComputeService:
                 "tunnel_mode": s.tunnel_mode,
                 "public_url": s.worker_public_url,
                 "runpod": {"configured": self.configured(), "datacenter": s.runpod_datacenter,
-                           "idle_min": s.runpod_idle_min, "max_pod_hours": s.runpod_max_pod_hours},
+                           "idle_min": s.runpod_idle_min, "max_pod_hours": s.runpod_max_pod_hours,
+                           "gpus": s.runpod_gpu_list},
                 "pod": self.pod_view(now),
                 "in_flight": ({"job_id": in_flight.id, "backend": job_backend(in_flight)}
                               if in_flight else None),
@@ -494,11 +495,11 @@ class ComputeService:
                        env={"RADAR_DESK_URL": pod.tunnel_url, "RADAR_WORKER_TOKEN": plaintext,
                             "RADAR_WORKER_ID": pod.worker_id, "RADAR_IMAGE": s.worker_image})
         try:
-            deployed = self.runpod.deploy(spec, attempts=1)
+            deployed = self.runpod.deploy(spec, gpus=s.runpod_gpu_list, attempts=1)
         except Exception as exc:  # noqa: BLE001 - a malformed answer too; the token must not outlive it
             self.workers.revoke_token(token.id)
             if isinstance(exc, StockError):
-                problem = f"No L4 or RTX 4090 in {s.runpod_datacenter}, retrying in {RETRY_S} s"
+                problem = f"No {' or '.join(s.runpod_gpu_list)} in {s.runpod_datacenter}, retrying in {RETRY_S} s"
             else:  # a GraphQL server can echo the whole input, token included
                 problem = str(exc).replace(plaintext, "[token]")
             self.hold_queued("no_gpu")

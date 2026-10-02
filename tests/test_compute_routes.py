@@ -30,7 +30,8 @@ def test_compute_routes(world):
     body = owner.get("/compute").json()
     assert set(body) == FIELDS
     assert body["mode"] == "worker" and body["changeable"] is True and body["tunnel_mode"] == "managed"
-    assert body["runpod"] == {"configured": True, "datacenter": "EU-RO-1", "idle_min": 10, "max_pod_hours": 3}
+    assert body["runpod"] == {"configured": True, "datacenter": "EU-RO-1", "idle_min": 10, "max_pod_hours": 3,
+                              "gpus": ["NVIDIA L4", "NVIDIA GeForce RTX 4090"]}
     assert body["pod"] is None and body["queued"] == 0 and body["month"] == "2026-10"
 
     r = owner.put("/compute", json={"mode": "modal"})

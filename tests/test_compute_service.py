@@ -345,6 +345,16 @@ def test_switch_to_modal_stops_the_pod_once_its_job_finishes(world):
     assert world.pod is None and world.last().reason == "mode"
 
 
+def test_runpod_gpus_sets_the_order_tried(tmp_path):
+    w = World(tmp_path, runpod_gpus="NVIDIA GeForce RTX 4090,NVIDIA L4")
+    w.queue()
+    w.rp.stock = True
+    w.tick()
+    w.tick()
+    assert w.rp.requested == ["NVIDIA GeForce RTX 4090", "NVIDIA L4"]
+    assert w.compute.status()["runpod"]["gpus"] == ["NVIDIA GeForce RTX 4090", "NVIDIA L4"]
+
+
 def test_the_hour_cap_stops_a_busy_pod(world):
     world.ready()
     world.tick(3 * 3600 - 30)
@@ -360,7 +370,8 @@ def test_stock_error_holds_no_gpu_and_retries_after_a_minute(world):
     world.tick()
     assert world.rp.requested == ["NVIDIA L4", "NVIDIA GeForce RTX 4090"] and world.sleeps == []
     assert world.pod.phase == "tunnel" and world.job(job_id).hold_reason == "no_gpu"
-    assert world.compute.status()["problem"] == "No L4 or RTX 4090 in EU-RO-1, retrying in 60 s"
+    assert world.compute.status()["problem"] == (
+        "No NVIDIA L4 or NVIDIA GeForce RTX 4090 in EU-RO-1, retrying in 60 s")
     assert all(t.revoked_at for t in world.svc.db.list_worker_tokens())
     world.rp.stock = False
     world.tick(59)

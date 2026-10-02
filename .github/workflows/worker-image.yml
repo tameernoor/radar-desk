@@ -53,5 +53,6 @@ jobs:
           context: .
           file: worker/docker/Dockerfile
           platforms: linux/amd64
-          push: true
+          # zstd layers extract several times faster than gzip on slow RunPod hosts (needs Docker 23+ there).
+          outputs: type=image,push=true,compression=zstd,compression-level=3,force-compression=true,oci-mediatypes=true
           tags: ${{ steps.tags.outputs.list }}

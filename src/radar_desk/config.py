@@ -9,8 +9,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import Field, SecretStr, ValidationError, model_validator
+from pydantic import Field, SecretStr, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from radar_desk.compute.runpod import DEFAULT_GPUS, parse_gpus
 
 DEFAULT_GPU_PRICES_USD_PER_S: dict[str, float] = {
     "T4": 0.000164,
@@ -73,6 +75,7 @@ class Settings(BaseSettings):
     runpod_volume_id: str | None = None
     runpod_registry_auth_id: str | None = None
     runpod_datacenter: str = "EU-RO-1"
+    runpod_gpus: str = DEFAULT_GPUS  # RunPod gpuTypeIds in order; compute/runpod.py owns the check
     runpod_idle_min: float = 10
     runpod_max_pod_hours: float = 3
     runpod_start_timeout_s: float = 600
@@ -83,6 +86,12 @@ class Settings(BaseSettings):
     chat_model: str | None = None
 
     max_upload_bytes: int = 314_572_800
+
+    @field_validator("runpod_gpus")
+    @classmethod
+    def _gpus_usable(cls, value: str) -> str:
+        parse_gpus(value, warn=True)  # the one place an unknown id is logged
+        return value
 
     @model_validator(mode="after")
     def _tunnel_matches_url(self) -> Settings:
@@ -107,6 +116,11 @@ class Settings(BaseSettings):
     def gpu_list(self) -> list[str]:
         """RADAR_GPU as an ordered list, so "L4,A10" gives ["L4", "A10"]."""
         return [g.strip() for g in self.radar_gpu.split(",") if g.strip()]
+
+    @property
+    def runpod_gpu_list(self) -> list[str]:
+        """RUNPOD_GPUS as an ordered list of RunPod gpuTypeIds."""
+        return parse_gpus(self.runpod_gpus)
 
     @property
     def resolved_llm_provider(self) -> str:
@@ -140,5 +154,6 @@ def load_settings(**overrides: Any) -> Settings:
             elif not name:  # a rule across settings; its message names them
                 problems.append(err["msg"].removeprefix("Value error, "))
             else:
-                problems.append(f"{name}: {err['msg']}")
+                msg = err["msg"].removeprefix("Value error, ")
+                problems.append(msg if msg.startswith(f"{name}") else f"{name}: {msg}")
         raise ConfigError("invalid settings: " + "; ".join(problems)) from None

@@ -3,11 +3,22 @@
 from __future__ import annotations
 
 import json
+import logging
 
 import httpx
 import pytest
 
-from radar_desk.compute.runpod import GPU_PREFERENCE, USER_AGENT, PodSpec, RunPod, RunPodError, StockError
+from radar_desk.compute.runpod import (
+    DEFAULT_GPUS,
+    GPU_PREFERENCE,
+    KNOWN_GPUS,
+    USER_AGENT,
+    PodSpec,
+    RunPod,
+    RunPodError,
+    StockError,
+    parse_gpus,
+)
 
 STOCK = "There are no longer any instances available with the requested specifications."
 PODS = {"data": {"myself": {"currentSpendPerHr": 0.39, "pods": [
@@ -96,9 +107,58 @@ def test_delete_other_status_raises():
         RunPod("key", client(lambda r: httpx.Response(500), [])).delete("p1")
 
 
-def test_no_blackwell_gpu_in_the_preference():
-    for gpu in GPU_PREFERENCE:
-        assert not any(part in gpu for part in ("RTX PRO", "B200", "5090")), gpu
+def test_default_gpus_parse_to_the_preference():
+    assert parse_gpus(DEFAULT_GPUS) == list(GPU_PREFERENCE)
+
+
+@pytest.mark.parametrize("name", [
+    "NVIDIA RTX PRO 6000 Blackwell Workstation Edition", "NVIDIA RTX PRO 4000 Blackwell", "NVIDIA B200",
+    "NVIDIA B300", "NVIDIA GeForce RTX 5090", "NVIDIA GeForce RTX 5080", "NVIDIA GeForce RTX 5070",
+    "NVIDIA RTX PRO 4500", "nvidia pro 6000", "NVIDIA RTX PRO 5000", "NVIDIA RTX PRO 2000",
+    "NVIDIA GeForce RTX 5060 Ti", "RTX5090", "NVIDIA RTX  PRO  6000", "NVIDIA GB200"])
+def test_parse_gpus_refuses_blackwell(name):
+    with pytest.raises(ValueError, match="Blackwell"):
+        parse_gpus(f"NVIDIA L4,{name}")
+
+
+@pytest.mark.parametrize("name", sorted(KNOWN_GPUS) + [
+    "NVIDIA RTX 5000 Ada Generation", "NVIDIA RTX 2000 Ada Generation", "NVIDIA H200", "NVIDIA H100 NVL",
+    "NVIDIA GeForce RTX 4080 SUPER", "NVIDIA GeForce RTX 3080 Ti"])
+def test_parse_gpus_keeps_every_pre_blackwell_part(name):
+    assert parse_gpus(name) == [name]
+
+
+def test_parse_gpus_strips_and_drops_duplicates():
+    assert parse_gpus(" NVIDIA GeForce RTX 4090 ,NVIDIA L4,,NVIDIA GeForce RTX 4090") == [
+        "NVIDIA GeForce RTX 4090", "NVIDIA L4"]
+    with pytest.raises(ValueError, match="names no GPU type"):
+        parse_gpus(" , ")
+
+
+def test_parse_gpus_warns_on_an_unknown_id_only_when_asked(caplog):
+    with caplog.at_level(logging.WARNING):
+        assert parse_gpus("NVIDIA L4,NVIDIA RTX A2000") == ["NVIDIA L4", "NVIDIA RTX A2000"]
+        assert caplog.text == ""  # a plain read, as status() does every few seconds, stays quiet
+        assert parse_gpus("NVIDIA L4,NVIDIA RTX A2000", warn=True) == ["NVIDIA L4", "NVIDIA RTX A2000"]
+    assert "NVIDIA RTX A2000 is not a GPU type" in caplog.text and "NVIDIA L4 is" not in caplog.text
+
+
+def test_deploy_tries_a_custom_order():
+    seen, sleeps = [], []
+
+    def handler(request):
+        gpu = json.loads(request.content)["variables"]["input"]["gpuTypeId"]
+        if gpu == "NVIDIA GeForce RTX 4090":
+            return httpx.Response(200, json={"errors": [{"message": STOCK}]})
+        return httpx.Response(200, json={"data": {"podFindAndDeployOnDemand": {
+            "id": "pod9", "name": "radar-worker", "costPerHr": 0.39, "desiredStatus": "RUNNING",
+            "machine": {"gpuDisplayName": "L4"}}}})
+
+    gpus = ["NVIDIA GeForce RTX 4090", "NVIDIA L4"]
+    pod = RunPod("key", client(handler, seen), sleep=sleeps.append).deploy(spec(), gpus=gpus, attempts=1)
+    assert pod.gpu == "L4"
+    assert [json.loads(r.content)["variables"]["input"]["gpuTypeId"] for r in seen] == gpus
+    assert sleeps == []
 
 
 def test_failed_delete_of_a_pod_that_is_gone_is_false():

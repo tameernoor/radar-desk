@@ -13,7 +13,7 @@ ENV_NAMES = [
     "STORAGE_BACKEND", "MODAL_DATA_VOLUME", "S3_BUCKET", "WORKER_LEASE_S",
     "WORKER_IMAGE", "WORKER_PUBLIC_URL", "WORKER_TUNNEL", "RUNPOD_API_KEY", "RUNPOD_VOLUME_ID",
     "RUNPOD_REGISTRY_AUTH_ID", "RUNPOD_DATACENTER", "RUNPOD_IDLE_MIN", "RUNPOD_MAX_POD_HOURS",
-    "RUNPOD_START_TIMEOUT_S",
+    "RUNPOD_START_TIMEOUT_S", "RUNPOD_GPUS",
 ]
 
 
@@ -198,3 +198,31 @@ def test_runpod_settings_and_defaults(monkeypatch):
     full = _settings(runpod_volume_id="v", runpod_registry_auth_id="r", worker_image="img")
     assert full.runpod_configured and "rp-secret-7777" not in repr(full)
     assert not _settings(runpod_volume_id="v", runpod_registry_auth_id="r").runpod_configured
+
+
+def test_runpod_gpus_default_and_custom_order(monkeypatch):
+    monkeypatch.setenv("OWNER_TOKEN", "x")
+    monkeypatch.setenv("SESSION_SECRET", "y")
+    assert load_settings(_env_file=None).runpod_gpu_list == ["NVIDIA L4", "NVIDIA GeForce RTX 4090"]
+    monkeypatch.setenv("RUNPOD_GPUS", "NVIDIA GeForce RTX 4090, NVIDIA L4")
+    assert load_settings(_env_file=None).runpod_gpu_list == ["NVIDIA GeForce RTX 4090", "NVIDIA L4"]
+
+
+@pytest.mark.parametrize("value", ["NVIDIA RTX PRO 6000 Blackwell Workstation Edition", "B200", " , "])
+def test_runpod_gpus_refuses_blackwell_and_empty(monkeypatch, value):
+    monkeypatch.setenv("OWNER_TOKEN", "x")
+    monkeypatch.setenv("SESSION_SECRET", "y")
+    monkeypatch.setenv("RUNPOD_GPUS", value)
+    with pytest.raises(ConfigError, match="RUNPOD_GPUS") as info:
+        load_settings(_env_file=None)
+    assert "Value error" not in str(info.value)
+
+
+def test_runpod_gpus_unknown_id_warns(monkeypatch, caplog):
+    monkeypatch.setenv("OWNER_TOKEN", "x")
+    monkeypatch.setenv("SESSION_SECRET", "y")
+    monkeypatch.setenv("RUNPOD_GPUS", "NVIDIA RTX A2000")
+    with caplog.at_level(logging.WARNING):
+        s = load_settings(_env_file=None)
+    assert s.runpod_gpu_list == ["NVIDIA RTX A2000"]
+    assert "NVIDIA RTX A2000 is not a GPU type this app knows" in caplog.text

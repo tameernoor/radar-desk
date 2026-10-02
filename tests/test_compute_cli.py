@@ -8,7 +8,7 @@ import os
 import httpx
 import pytest
 
-from radar_desk.compute.cli import Deps, main
+from radar_desk.compute.cli import Deps, compute_lines, main
 
 OWNER = "owner-secret-1"
 ENV = f"# radar desk\nOWNER_TOKEN={OWNER}\nGPU_BACKEND=fake\nLAST=1"
@@ -30,7 +30,8 @@ class FakeApp:
     def body(self) -> dict:
         return {"mode": self.mode, "changeable": True, "changed_at": None, "tunnel_mode": "managed",
                 "public_url": None,
-                "runpod": {"configured": True, "datacenter": "EU-RO-1", "idle_min": 10, "max_pod_hours": 3},
+                "runpod": {"configured": True, "datacenter": "EU-RO-1", "idle_min": 10, "max_pod_hours": 3,
+                           "gpus": ["NVIDIA L4", "NVIDIA GeForce RTX 4090"]},
                 "pod": self.pod, "in_flight": None, "queued": 0, "held": [], "problem": self.problem,
                 "last_event": None, "spend_month_usd": 1.234, "budget_usd": 10.0, "month": "2026-10"}
 
@@ -125,6 +126,7 @@ def test_status_prints_health_compute_and_workers(world, capsys):
     assert out.splitlines() == [
         "app: backend worker, version 1.2.3",
         "compute: mode worker, tunnel managed",
+        "gpus: NVIDIA L4, NVIDIA GeForce RTX 4090 in EU-RO-1",
         "pod: rp123, ready, NVIDIA L4, $0.390/h, image ghcr.io/x/radar-worker:0.1, up 12 min",
         "problem: RunPod did not answer",
         "spend: $1.23 of $10.00 in 2026-10",
@@ -166,3 +168,11 @@ def test_the_environment_wins_and_a_missing_token_is_named(world, capsys):
     code, _, err = run(capsys, "status")
     assert code == 1
     assert "OWNER_TOKEN is not set" in err
+
+
+def test_an_older_body_without_gpus_prints_no_gpus_line():
+    body = {"mode": "worker", "changeable": True, "tunnel_mode": "managed", "runpod": {"datacenter": "EU-RO-1"},
+            "pod": None, "spend_month_usd": 0.0, "budget_usd": 10.0, "month": "2026-10"}
+    assert not any(line.startswith("gpus:") for line in compute_lines(body))
+    body["runpod"] = {"gpus": ["NVIDIA L4"]}
+    assert "gpus: NVIDIA L4" in compute_lines(body)
