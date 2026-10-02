@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from radar_desk.config import ConfigError
 from radar_desk.storage.base import ObjectExists, ObjectMissing, Storage, StorageError, validate_key
@@ -22,6 +23,7 @@ __all__ = [
     "S3Storage",
     "Storage",
     "StorageError",
+    "describe_storage",
     "make_storage",
     "storage_backend",
     "validate_key",
@@ -41,9 +43,25 @@ def storage_backend(settings: Any) -> str:
     return "s3" if getattr(settings, "s3_bucket", None) else "local"
 
 
-def make_storage(settings: Any) -> Storage:
-    """Build the adapter from settings-like attributes (see the Settings class in config.py)."""
+def describe_storage(settings: Any) -> str:
+    """The storage's display name for the jobs page, GET /compute and the start-up log."""
     backend = storage_backend(settings)
+    if backend == "s3":
+        host = urlsplit(settings.s3_endpoint_url).hostname if getattr(settings, "s3_endpoint_url", None) else None
+        if host and (host == "fly.storage.tigris.dev" or host.endswith(".tigris.dev")):
+            return f"Tigris bucket {settings.s3_bucket}"
+        return f"S3 bucket {settings.s3_bucket} ({host})" if host else f"S3 bucket {settings.s3_bucket}"
+    if backend == "modal_volume":
+        return f"Modal volume {settings.modal_data_volume}"
+    if backend == "runpod_volume":
+        return f"RunPod volume {settings.runpod_volume_id} ({settings.runpod_datacenter})"
+    return "Local folder"
+
+
+def make_storage(settings: Any, backend: str | None = None) -> Storage:
+    """Build the adapter from settings-like attributes (see the Settings class in config.py). `backend`
+    overrides storage_backend(settings), for scripts/migrate_storage.py."""
+    backend = backend or storage_backend(settings)
     if backend == "modal_volume":
         tid, tsecret = getattr(settings, "modal_token_id", None), getattr(settings, "modal_token_secret", None)
         creds = (_plain(tid), _plain(tsecret)) if tid is not None and tsecret is not None else None

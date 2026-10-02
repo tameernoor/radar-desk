@@ -50,6 +50,19 @@ export function computePhrase(s, nowMs) {
   return { text, tone };
 }
 
+// One Compute radio: its label, whether it is disabled, and the tooltip on its <label>. c is the GET /compute
+// body; a missing `storage` block (an older backend) reads as every mode available.
+export function modeControl(c, value) {
+  const name = value === "modal" ? "Modal" : value === "serverless" ? "RunPod serverless" : c.runpod?.configured ? "RunPod pod" : "Worker";
+  const m = c.storage?.modes?.[value];
+  const unavailable = m?.available === false;
+  return {
+    label: unavailable && m.note ? `${name} (${m.note})` : name,
+    disabled: !c.changeable || unavailable,
+    title: unavailable ? m.reason ?? null : null,
+  };
+}
+
 // The address workers use to reach this app: the managed quick tunnel of the open pod, or the fixed
 // WORKER_PUBLIC_URL. Null when there is none to show.
 export function workerUrl(s) {

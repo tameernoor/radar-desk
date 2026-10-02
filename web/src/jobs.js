@@ -1,6 +1,6 @@
 import "./styles.css";
 import { ApiError, api, del, get, post } from "./api.js";
-import { computePhrase, workerUrl } from "./compute.js";
+import { computePhrase, modeControl, workerUrl } from "./compute.js";
 import { el, elapsed, shortId, usd, when } from "./format.js";
 import { wireLogout } from "./login.js";
 
@@ -116,8 +116,8 @@ async function load() {
 let compute = null; // the last GET /compute body
 let gpus = []; // the Modal GPUs requested, for the phrase
 
-const modeLabel = (mode) =>
-  mode === "modal" ? "Modal" : mode === "serverless" ? "RunPod serverless" : compute?.runpod?.configured ? "RunPod pod" : "Worker";
+// The confirmation sentence names a mode that can be chosen, so its label has no note.
+const modeLabel = (mode) => modeControl(compute, mode).label;
 
 async function computeAct(promise) {
   const status = document.getElementById("compute-status");
@@ -146,11 +146,15 @@ function renderCompute(c) {
   }
   for (const input of document.querySelectorAll('input[name="compute-mode"]')) {
     input.checked = input.value === c.mode; // also snaps a radio back while a switch waits for its confirmation
-    const unconfigured = input.value === "serverless" && !c.serverless?.configured;
-    input.disabled = !c.changeable || unconfigured;
-    const label = modeLabel(input.value) + (unconfigured ? " (needs RUNPOD_ENDPOINT_ID)" : "");
+    const { label, disabled, title } = modeControl(c, input.value);
+    input.disabled = disabled;
+    if (title) input.parentElement.title = title;
+    else input.parentElement.removeAttribute("title");
     if (!input.dataset.armed) input.parentElement.querySelector("[data-label]").textContent = label;
   }
+  const storage = document.getElementById("compute-storage");
+  storage.hidden = !c.storage;
+  storage.textContent = c.storage ? `Storage: ${c.storage.name} (used by all modes)` : "";
   document.getElementById("compute-fixed").hidden = c.changeable;
   document.getElementById("pod-start").hidden = !(c.mode === "worker" && c.runpod.configured && !c.pod);
   document.getElementById("pod-stop").hidden = !c.pod;

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 
@@ -12,6 +13,11 @@ from radar_desk.config import ConfigError, load_settings
 
 
 def main() -> None:
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(logging.Formatter("%(levelname)s:     %(name)s: %(message)s"))
+    logger = logging.getLogger("radar_desk")
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
     try:
         app = create_app(load_settings())
     except ConfigError as exc:

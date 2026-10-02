@@ -1,6 +1,6 @@
 // Unit tests for src/compute.js. Playwright runs these in Node; no browser is opened.
 import { expect, test } from "@playwright/test";
-import { computePhrase, fromGpuStatus, workerUrl } from "../src/compute.js";
+import { computePhrase, fromGpuStatus, modeControl, workerUrl } from "../src/compute.js";
 
 const NOW = Date.parse("2026-10-02T12:00:00Z");
 const at = (secondsAgo) => new Date(NOW - secondsAgo * 1000).toISOString();
@@ -172,4 +172,37 @@ test("worker URL: managed tunnel of the pod, fixed URL, nothing on modal", () =>
   expect(workerUrl({ ...base, tunnel_mode: "managed", pod: null })).toBeNull();
   expect(workerUrl({ ...base, tunnel_mode: "external", public_url: "https://radar.example.org" })).toEqual({ url: "https://radar.example.org", label: "Worker URL", note: "fixed" });
   expect(workerUrl({ ...managed, mode: "modal" })).toBeNull();
+});
+
+const open = { available: true, reason: null, note: null };
+const localReason = "Modal cannot reach a local folder; this app stores scans under DATA_DIR";
+const storage = (modal, serverless) => ({ backend: "local", name: "Local folder", modes: { modal, worker: open, serverless } });
+
+test("mode control: an available mode has no note and no title", () => {
+  const c = { ...base, storage: storage(open, open) };
+  expect(modeControl(c, "modal")).toEqual({ label: "Modal", disabled: false, title: null });
+  expect(modeControl(c, "serverless")).toEqual({ label: "RunPod serverless", disabled: false, title: null });
+});
+
+test("mode control: an unavailable mode is disabled, with its note and reason", () => {
+  const c = { ...base, storage: storage({ available: false, reason: localReason, note: "not on local storage" }, open) };
+  expect(modeControl(c, "modal")).toEqual({ label: "Modal (not on local storage)", disabled: true, title: localReason });
+  expect(modeControl(c, "worker")).toEqual({ label: "RunPod pod", disabled: false, title: null });
+});
+
+test("mode control: not changeable disables every mode but adds no note", () => {
+  const c = { ...base, mode: "fake", changeable: false, storage: storage(open, open) };
+  expect(modeControl(c, "modal")).toEqual({ label: "Modal", disabled: true, title: null });
+  expect(modeControl(c, "worker")).toEqual({ label: "RunPod pod", disabled: true, title: null });
+});
+
+test("mode control: a missing storage block reads as every mode available", () => {
+  expect(modeControl(base, "modal")).toEqual({ label: "Modal", disabled: false, title: null });
+  expect(modeControl(base, "serverless")).toEqual({ label: "RunPod serverless", disabled: false, title: null });
+});
+
+test("mode control: the worker label follows the RunPod keys", () => {
+  expect(modeControl(base, "worker").label).toBe("RunPod pod");
+  expect(modeControl({ ...base, runpod: { configured: false } }, "worker").label).toBe("Worker");
+  expect(modeControl({ ...base, runpod: undefined }, "worker").label).toBe("Worker");
 });

@@ -16,12 +16,14 @@ from radar_desk.services.compute import (
     SERVERLESS_FALLBACK,
     SERVERLESS_NEEDS_CONFIG,
     SERVERLESS_NEEDS_STORAGE,
+    mode_refusal,
 )
 from test_compute_service import OWNER, World
 from test_serverless_backend import ENDPOINT
 
 FIELDS = {"mode", "changeable", "changed_at", "tunnel_mode", "public_url", "runpod", "serverless", "pod",
-          "in_flight", "queued", "held", "problem", "last_event", "spend_month_usd", "budget_usd", "month"}
+          "in_flight", "queued", "held", "problem", "last_event", "spend_month_usd", "budget_usd", "month",
+          "storage"}
 POD_FIELDS = {"id", "runpod_id", "phase", "gpu", "image", "cost_per_hr", "created_at", "started_at",
               "ready_at", "up_s", "idle_s", "idle_delete_s", "worker_id", "tunnel_url", "tunnel_alive", "job_id"}
 
@@ -136,6 +138,7 @@ def test_the_fake_backend_is_fixed(make_services):
     owner, _ = clients(make_services())
     body = owner.get("/compute").json()
     assert body["mode"] == "fake" and body["changeable"] is False and body["runpod"]["configured"] is False
+    assert body["storage"]["backend"] == "local" and body["storage"]["name"] == "Local folder"
     assert body["serverless"]["configured"] is False and body["serverless"]["job"] is None
     r = owner.put("/compute", json={"mode": "worker"})
     assert r.status_code == 409 and r.json()["detail"] == FIXED
@@ -166,3 +169,56 @@ def test_the_lifespan_reconciles_before_the_poller(world):
     with TestClient(create_app(world.svc.settings, world.svc)):
         pass
     assert world.rp.deleted == ["rp-stray"]
+
+
+LOCAL_MODAL = ("not on local storage", "Modal cannot reach a local folder; this app stores scans under DATA_DIR")
+VOLUME_MODAL = ("not on the RunPod volume", "Modal cannot reach the RunPod volume; it has no presigned URLs")
+NEEDS_BUCKET = "Serverless needs a shared bucket or the RunPod volume; this app stores scans "
+LOCAL_SERVERLESS = ("needs a shared bucket", NEEDS_BUCKET + "in a local folder")
+MODAL_SERVERLESS = ("needs a shared bucket", NEEDS_BUCKET + "on the Modal volume")
+NO_KEY = ("no RunPod key", "RunPod keys missing; set RUNPOD_API_KEY")
+NO_ENDPOINT = ("no endpoint", "No endpoint configured; run scripts/runpod_endpoint.py create and set RUNPOD_ENDPOINT_ID")
+
+# kind -> (overrides, backend, name, modal row or None, serverless row from the storage or None)
+STORAGES = {
+    "local": ({"storage_backend": None, "s3_bucket": None}, "local", "Local folder", LOCAL_MODAL,
+              LOCAL_SERVERLESS),
+    "s3": ({"storage_backend": None, "s3_bucket": "b", "s3_endpoint_url": "https://fly.storage.tigris.dev"},
+           "s3", "Tigris bucket b", None, None),
+    "modal_volume": ({"storage_backend": "modal_volume"}, "modal_volume", "Modal volume radar-data", None,
+                     MODAL_SERVERLESS),
+    "runpod_volume": ({"storage_backend": "runpod_volume", "runpod_s3_access_key_id": "a",
+                       "runpod_s3_secret_access_key": "b"}, "runpod_volume", "RunPod volume vol-1 (EU-RO-1)",
+                      VOLUME_MODAL, None),
+}
+SERVERLESS_CONFIGS = {
+    "no key": ({"runpod_api_key": None}, NO_KEY),
+    "key only": ({}, NO_ENDPOINT),
+    "key and endpoint": ({"runpod_endpoint_id": ENDPOINT}, None),
+}
+
+
+@pytest.mark.parametrize("config", SERVERLESS_CONFIGS)
+@pytest.mark.parametrize("kind", STORAGES)
+def test_the_storage_block(tmp_path, kind, config):
+    overrides, backend, name, modal_row, storage_row = STORAGES[kind]
+    config_overrides, config_row = SERVERLESS_CONFIGS[config]
+    w = World(tmp_path, **overrides, **config_overrides)
+    owner, _ = clients(w.svc)
+    storage = owner.get("/compute").json()["storage"]
+    assert storage["backend"] == backend and storage["name"] == name
+
+    def expect(row):
+        return ({"available": False, "note": row[0], "reason": row[1]} if row
+                else {"available": True, "note": None, "reason": None})
+
+    assert storage["modes"] == {"modal": expect(modal_row), "worker": expect(None),
+                                "serverless": expect(storage_row or config_row)}
+    for mode in ("modal", "serverless"):
+        assert storage["modes"][mode]["available"] == (mode_refusal(w.settings, mode) is None)
+
+
+def test_create_app_logs_the_storage(world, caplog):
+    with caplog.at_level("INFO", logger="radar_desk"):
+        create_app(world.svc.settings, world.svc, start_poller=False)
+    assert "storage: S3 bucket b (s3)" in caplog.messages
