@@ -198,3 +198,41 @@ test("workspace: findings, viewer, page tools, keys", async ({ page }) => {
   expect([vs.slice_type, vs.plane, vs.reference_planes]).toEqual(["coronal", "coronal", []]);
   expect(await page.evaluate(() => window.__radar.viewer.nv.getCustomLayout())).toBeNull();
 });
+
+test("organ chip toggles: a second click shows all organs again", async ({ page }) => {
+  await login(page);
+  const scanId = await scanWithDoneJob(page);
+  await page.goto(`/workspace.html?scan=${encodeURIComponent(scanId)}`);
+  await page.waitForFunction(() => window.__radar?.viewState().mask_loaded === true, null, { timeout: 60_000 });
+  const vs = () => page.evaluate(() => window.__radar.viewState());
+
+  const chip = page.locator(".organ-chip.status-window, .organ-chip.status-crop").first();
+  const organ = await chip.getAttribute("data-organ");
+  await chip.click();
+  await expect.poll(async () => (await vs()).active_organ).toBe(organ);
+  expect((await vs()).isolated_label).not.toBeNull();
+  await expect(page.locator(`.organ-chip.current[data-organ="${organ}"]`)).toHaveCount(1);
+
+  await chip.click();
+  await expect.poll(async () => (await vs()).isolated_label).toBeNull();
+  expect((await vs()).active_organ).toBeNull();
+  await expect(page.locator(".organ-chip.current")).toHaveCount(0);
+
+  // "Show all" resets the same way.
+  await chip.click();
+  await expect.poll(async () => (await vs()).active_organ).toBe(organ);
+  await page.locator("#show-all").click();
+  await expect.poll(async () => (await vs()).active_organ).toBeNull();
+  expect((await vs()).isolated_label).toBeNull();
+  await expect(page.locator(".organ-chip.current")).toHaveCount(0);
+
+  // The chat's jump never toggles: two jumps leave the organ isolated.
+  for (let i = 0; i < 2; i++) {
+    await page.evaluate(async (organ) => {
+      const mc = document.modelContext;
+      const tool = (await mc.getTools()).find((t) => t.name === "jump_to_organ");
+      await mc.executeTool(tool, JSON.stringify({ organ }));
+    }, organ);
+  }
+  expect((await vs()).isolated_label).not.toBeNull();
+});
