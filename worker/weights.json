@@ -1,5 +1,7 @@
 {
   "volume": "radar-weights",
+  "hf_repo": "radar-generalist/RADAR",
+  "hf_revision": "3861f2d3e004451c77a6d3afc3e66a9c3e00bc60",
   "sources": {
     "checkpoint_radar_pretrain.pth": "huggingface.co/radar-generalist/RADAR",
     "bert-base-chinese/": "huggingface.co/radar-generalist/RADAR (folder bert-base-chinese/)",
