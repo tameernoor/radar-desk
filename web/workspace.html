@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Workspace · radar-desk</title>
+</head>
+<body class="workspace-page">
+  <div class="app">
+  <header class="topbar">
+    <a class="brand" href="/">radar-desk</a>
+    <nav>
+      <a href="/">Scans</a>
+      <a href="/jobs.html">Jobs</a>
+    </nav>
+    <span class="research-tag">Research use only</span>
+    <button type="button" class="link" id="logout">Log out</button>
+  </header>
+    <div class="scanbar" id="scanbar">
+      <span id="scan-title" class="scan-title">Loading scan…</span>
+      <span id="scan-facts" class="muted"></span>
+      <span id="job-status" class="job-status" role="status" aria-live="polite"></span>
+      <span id="shown-job" class="shown-job" hidden></span>
+      <span id="fake-banner" class="fake-banner" hidden>Fake GPU backend: these scores are synthetic, not RADAR output.</span>
+    </div>
+    <div class="stage">
+      <div id="workspace-main" class="workspace-main">
+        <aside class="findings-pane" aria-label="Findings">
+          <div class="organ-strip" id="organ-strip" aria-label="Organ coverage"></div>
+          <div class="strip-key muted">
+            <span><i class="key key-window"></i>scored in a window</span>
+            <span><i class="key key-crop"></i>scored by centred crop</span>
+            <span><i class="key key-missing"></i>not found</span>
+          </div>
+          <div class="findings-controls">
+            <label>Sort
+              <select id="sort">
+                <option value="organ">by organ</option>
+                <option value="score">by score</option>
+              </select>
+            </label>
+            <label class="check"><input type="checkbox" id="positives-only"> At or above line only</label>
+          </div>
+          <div class="threshold">
+            <label for="threshold">Display line <output id="threshold-value">50%</output></label>
+            <input type="range" id="threshold" min="0" max="100" step="1" value="50">
+            <p class="threshold-note">RADAR ships no calibrated thresholds; this line is for display. A score is not urgency.</p>
+          </div>
+          <div class="findings-list" id="findings" tabindex="-1"></div>
+        </aside>
+        <section class="viewer-pane" aria-label="Viewer">
+          <div class="viewer-toolbar" id="viewer-toolbar">
+            <div class="btn-group" role="group" aria-label="View">
+              <button type="button" data-slice="axial" aria-pressed="true">Axial</button>
+              <button type="button" data-slice="coronal">Coronal</button>
+              <button type="button" data-slice="sagittal">Sagittal</button>
+              <button type="button" data-slice="multiplanar" title="m">Multiplanar</button>
+              <button type="button" data-slice="render">3D</button>
+            </div>
+            <div class="btn-group" role="group" aria-label="Window">
+              <button type="button" data-window="soft_tissue" title="1" aria-pressed="true">Soft tissue</button>
+              <button type="button" data-window="liver" title="2">Liver</button>
+              <button type="button" data-window="bone" title="3">Bone</button>
+              <button type="button" data-window="lung" title="4">Lung</button>
+            </div>
+            <div class="btn-group" role="group" aria-label="Mask">
+              <button type="button" id="mask-toggle" title="space" aria-pressed="true">Mask</button>
+              <label class="inline">Opacity <input type="range" id="mask-opacity" min="0" max="100" value="45"></label>
+              <button type="button" id="outline-toggle" aria-pressed="false">Outline</button>
+              <button type="button" id="box-toggle" aria-pressed="false" title="Where RADAR looked for the selected organ">Scoring box</button>
+              <button type="button" id="show-all" title="Show every organ in the mask">All organs</button>
+            </div>
+          </div>
+          <div class="viewer-wrap">
+            <canvas id="viewer"></canvas>
+            <div class="viewer-notice" id="viewer-notice" hidden></div>
+            <div class="viewer-notice viewer-prompt" id="viewer-prompt" hidden></div>
+          </div>
+          <div class="viewer-bottom">
+            <div class="readout" id="readout">mm –, HU –, label –</div>
+            <div class="legend" id="legend" aria-label="Organs in the mask"></div>
+          </div>
+        </section>
+      </div>
+    </div>
+    <footer class="footer footer-workspace">
+      <p class="versions" id="versions">No result loaded.</p>
+    <p class="licence">Model: RADAR by Alibaba DAMO Academy, CC BY-NC-SA 4.0. Paper: "An expert-level generalist AI for abdominal CT diagnosis", Science 393(6817), doi 10.1126/science.aec6129. Weights: <a href="https://huggingface.co/radar-generalist/RADAR" rel="noopener">huggingface.co/radar-generalist/RADAR</a>.</p>
+    <p class="licence">From the model card: "The Radar model is currently intended for research purposes only. Further improvements and prospective clinical studies are still required before it can be used directly for clinical deployment." Not a medical device.</p>
+    </footer>
+  </div>
+  <script type="module" src="/src/workspace.js"></script>
+</body>
+</html>

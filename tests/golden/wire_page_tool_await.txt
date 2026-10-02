@@ -1,0 +1,18 @@
+event: execution_start
+data: {"type":"execution_start","executionId":"exec_1","seq":0,"kind":"agent","agentId":"radar-desk","agentName":"radar-desk","startedAt":"2026-10-01T00:00:00Z"}
+
+event: turn_start
+data: {"type":"turn_start","executionId":"exec_1","seq":1,"id":"turn_1","role":"assistant","iteration":1}
+
+event: text_start
+data: {"type":"text_start","executionId":"exec_1","seq":2,"id":"text_1"}
+
+event: text_delta
+data: {"type":"text_delta","executionId":"exec_1","seq":3,"id":"text_1","delta":"Moving the view."}
+
+event: text_complete
+data: {"type":"text_complete","executionId":"exec_1","seq":4,"id":"text_1"}
+
+event: await
+data: {"type":"await","executionId":"exec_1","seq":5,"toolName":"jump_to_organ","origin":"webmcp","toolId":"call_page_1","toolCallId":"call_page_1","parameters":{"organ":"liver"},"awaitedAt":"2026-10-01T00:00:00Z"}
+

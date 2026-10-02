@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scans · radar-desk</title>
+</head>
+<body class="page">
+  <header class="topbar">
+    <a class="brand" href="/">radar-desk</a>
+    <nav>
+      <a href="/" aria-current="page">Scans</a>
+      <a href="/jobs.html">Jobs</a>
+    </nav>
+    <span class="research-tag">Research use only</span>
+    <button type="button" class="link" id="logout">Log out</button>
+  </header>
+  <div class="gpu-strip" id="gpu-strip" role="status" aria-live="polite">Checking GPU…</div>
+  <main class="content">
+    <section class="dropzone" id="dropzone" aria-labelledby="upload-title">
+      <h2 id="upload-title">Upload a CT</h2>
+      <p class="policy">Research use only. Upload public or research scans only, never data that identifies a patient. This app does not de-identify anything.</p>
+      <label class="check"><input type="checkbox" id="research-ok"> I confirm this scan is a public or research scan and will be used for research only.</label>
+      <div class="drop-target" id="drop-target" tabindex="0">
+        <p>Drop a <code>.nii</code> or <code>.nii.gz</code> file here, or <label class="file-pick">choose one<input type="file" id="file-input" accept=".nii,.gz,.nii.gz" hidden></label>.</p>
+      </div>
+      <div class="upload-status" id="upload-status" hidden>
+        <progress id="upload-progress" max="100" value="0"></progress>
+        <span id="upload-text"></span>
+      </div>
+    </section>
+    <section aria-labelledby="scans-title">
+      <h2 id="scans-title">Scans</h2>
+      <div class="table-wrap">
+        <table class="grid" id="scans-table">
+          <thead><tr>
+            <th>File</th><th>State</th><th>Dimensions</th><th>Spacing (mm)</th><th>Size</th><th>Fixture</th><th class="num" title="Count of findings in the latest done job">At or above the 50% display line</th><th>Added</th><th></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="muted" id="scans-empty" hidden>No scans yet.</p>
+    </section>
+  </main>
+  <footer class="footer">
+    <p class="licence">Model: RADAR by Alibaba DAMO Academy, CC BY-NC-SA 4.0. Paper: "An expert-level generalist AI for abdominal CT diagnosis", Science 393(6817), doi 10.1126/science.aec6129. Weights: <a href="https://huggingface.co/radar-generalist/RADAR" rel="noopener">huggingface.co/radar-generalist/RADAR</a>.</p>
+    <p class="licence">From the model card: "The Radar model is currently intended for research purposes only. Further improvements and prospective clinical studies are still required before it can be used directly for clinical deployment." Not a medical device.</p>
+  </footer>
+  <script type="module" src="/src/app.js"></script>
+</body>
+</html>

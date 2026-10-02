@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+data/
+.env
+web/node_modules/
+smoke-out/
+.DS_Store
+web/dist/
+web/test-results/
+web/playwright-report/
+fixtures/*.nii.gz
+fixtures/expected/radar-web/*.json
+.env.*
+!.env.example

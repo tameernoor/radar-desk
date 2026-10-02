@@ -1,0 +1,51 @@
+[project]
+name = "radar-desk"
+version = "0.1.0"
+description = "Run DAMO Academy's RADAR abdominal CT model on research scans, next to the image, with a chat agent."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "CC-BY-NC-SA-4.0"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "nibabel>=5.2",
+    "numpy>=1.26",
+    "httpx>=0.27",
+    "boto3>=1.34",
+    "itsdangerous>=2.2",
+    "modal==1.6.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/radar_desk"]
+
+[tool.uv]
+package = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["worker"]
+asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 110
+extend-exclude = ["worker/vendor"]
+target-version = "py312"
+src = ["src", "worker", "tests", "scripts"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/test_chat_route.py" = ["F811"]  # fixtures imported from test_api

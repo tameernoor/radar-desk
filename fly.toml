@@ -1,0 +1,45 @@
+# Fly.io app for the API server only. The GPU runs on Modal.
+app = "radar-desk"
+primary_region = "ams"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  HOST = "0.0.0.0"
+  PORT = "8080"
+  DATA_DIR = "/data"
+  PUBLIC_BASE_URL = "https://radar-desk.fly.dev"
+  APP_HOSTNAME = "radar-desk.fly.dev"
+  GPU_BACKEND = "modal"
+  MODAL_APP_NAME = "radar-desk"
+  MODAL_FUNCTION_NAME = "score"
+  RADAR_GPU = "L4,L40S"
+  GPU_MONTHLY_BUDGET_USD = "10"
+  S3_BUCKET = "radar-desk"
+  S3_ENDPOINT_URL = "https://fly.storage.tigris.dev"
+  S3_REGION = "auto"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/health"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "20s"
+    headers = { Host = "radar-desk.fly.dev" }
+
+[mounts]
+  source = "radar_desk_data"
+  destination = "/data"
+  initial_size = "3gb"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

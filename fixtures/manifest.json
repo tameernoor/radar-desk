@@ -1,0 +1,86 @@
+{
+  "note": "sha256 of each known scan. An upload whose sha256 matches is tagged with the id, and compare_scores can use the references listed. Scans are not committed; see fixtures/README.md.",
+  "scans": {
+    "1de4a89125713742f8a77f91ae2f18a05e8bcb8c89b7a5561ed12c7aae654970": {
+      "id": "AC4214dbd",
+      "filename": "merlin-AC4214dbd.nii.gz",
+      "source": "damo-radar data/merlin_data_train_demo/resized_images/AC4214dbd.nii.gz",
+      "dims": [437, 437, 87],
+      "spacing_mm": [1.0, 1.0, 5.034],
+      "dtype": "float32",
+      "orientation": "LAS",
+      "references": [
+        {"source": "radar-web", "file": "expected/radar-web/AC4214dbd.json", "tolerance": 0.001},
+        {"source": "tally", "file": "expected/tally.json", "tolerance": 0.01}
+      ],
+      "damo_mask": "expected/damo-resized-masks/AC4214dbd.nii.gz"
+    },
+    "8deae58c820b770144dbc0a6bfb9bd260b6b8f8a3b944f7d99c34d1d08e815b7": {
+      "id": "AC4240fff",
+      "filename": "merlin-AC4240fff.nii.gz",
+      "source": "damo-radar data/merlin_data_train_demo/resized_images/AC4240fff.nii.gz",
+      "dims": [460, 460, 106],
+      "spacing_mm": [1.0, 1.0, 5.009],
+      "dtype": "float32",
+      "orientation": "LAS",
+      "references": [
+        {"source": "radar-web", "file": "expected/radar-web/AC4240fff.json", "tolerance": 0.001},
+        {"source": "tally", "file": "expected/tally.json", "tolerance": 0.01}
+      ],
+      "damo_mask": "expected/damo-resized-masks/AC4240fff.nii.gz"
+    },
+    "71519d1b7e0cbdf05d9e03089b0c5afec78e27c5a5438584ae2a9d8847b4b4c4": {
+      "id": "AC4242a2f",
+      "filename": "merlin-AC4242a2f.nii.gz",
+      "source": "damo-radar data/merlin_data_train_demo/resized_images/AC4242a2f.nii.gz",
+      "dims": [474, 474, 100],
+      "spacing_mm": [1.002, 1.002, 5.025],
+      "dtype": "float32",
+      "orientation": "LAS",
+      "references": [
+        {"source": "radar-web", "file": "expected/radar-web/AC4242a2f.json", "tolerance": 0.001},
+        {"source": "tally", "file": "expected/tally.json", "tolerance": 0.01}
+      ],
+      "damo_mask": "expected/damo-resized-masks/AC4242a2f.nii.gz"
+    },
+    "6e39c5ff4a9f397a018de2f0faef8edb4e389e3d97dae79a3459e8e096ca49e9": {
+      "id": "AC4242a55",
+      "filename": "merlin-AC4242a55.nii.gz",
+      "source": "damo-radar data/merlin_data_train_demo/resized_images/AC4242a55.nii.gz",
+      "dims": [448, 448, 95],
+      "spacing_mm": [1.0, 1.0, 5.013],
+      "dtype": "float32",
+      "orientation": "LAS",
+      "references": [
+        {"source": "radar-web", "file": "expected/radar-web/AC4242a55.json", "tolerance": 0.001},
+        {"source": "tally", "file": "expected/tally.json", "tolerance": 0.01}
+      ],
+      "damo_mask": "expected/damo-resized-masks/AC4242a55.nii.gz"
+    },
+    "7eff152f2c0577eb39390f7e499d27f9e0c10683f3a02dec3603858b4076f9ed": {
+      "id": "image1",
+      "filename": "merlin-image1.nii.gz",
+      "source": "huggingface.co/stanfordmimi/Merlin image1.nii.gz",
+      "dims": [512, 512, 489],
+      "spacing_mm": [0.98, 0.98, 1.0],
+      "dtype": "int16",
+      "orientation": "LAS",
+      "references": [
+        {"source": "radar-web", "file": "expected/radar-web/image1.json", "tolerance": 0.001},
+        {"source": "tally", "file": "expected/tally.json", "tolerance": 0.01}
+      ]
+    },
+    "8e0e52551b675cb64907bb74506cd9393f195454a6ee7ebf56163e2c136fbabf": {
+      "id": "AC423ccbe",
+      "filename": "AC423ccbe.nii.gz",
+      "source": "damo-radar data/demo_cases/AC423ccbe.nii.gz",
+      "dims": [512, 512, 368],
+      "spacing_mm": [0.703, 0.703, 1.25],
+      "dtype": "int16",
+      "orientation": "LAS",
+      "references": [
+        {"source": "damo-demo", "file": "expected/damo-demo.csv", "tolerance": 0.01}
+      ]
+    }
+  }
+}

@@ -1,0 +1,1470 @@
+{
+  "findings": [
+    {
+      "english": "Aorta_Aortic dissection",
+      "finding": "Aortic dissection",
+      "index": 0,
+      "key": "主动脉_主动脉夹层",
+      "organ": "Aorta",
+      "organ_zh": "主动脉"
+    },
+    {
+      "english": "Aorta_Aortic aneurysm",
+      "finding": "Aortic aneurysm",
+      "index": 1,
+      "key": "主动脉_主动脉瘤",
+      "organ": "Aorta",
+      "organ_zh": "主动脉"
+    },
+    {
+      "english": "Aorta_Atherosclerosis",
+      "finding": "Atherosclerosis",
+      "index": 2,
+      "key": "主动脉_粥样硬化",
+      "organ": "Aorta",
+      "organ_zh": "主动脉"
+    },
+    {
+      "english": "Aorta_Calcification",
+      "finding": "Calcification",
+      "index": 3,
+      "key": "主动脉_钙化",
+      "organ": "Aorta",
+      "organ_zh": "主动脉"
+    },
+    {
+      "english": "Duodenum_Mass",
+      "finding": "Mass",
+      "index": 4,
+      "key": "十二指肠_占位",
+      "organ": "Duodenum",
+      "organ_zh": "十二指肠"
+    },
+    {
+      "english": "Duodenum_Saccular outpouching",
+      "finding": "Saccular outpouching",
+      "index": 5,
+      "key": "十二指肠_囊袋状突出影",
+      "organ": "Duodenum",
+      "organ_zh": "十二指肠"
+    },
+    {
+      "english": "Duodenum_Diverticulum",
+      "finding": "Diverticulum",
+      "index": 6,
+      "key": "十二指肠_憩室",
+      "organ": "Duodenum",
+      "organ_zh": "十二指肠"
+    },
+    {
+      "english": "Duodenum_Obstruction",
+      "finding": "Obstruction",
+      "index": 7,
+      "key": "十二指肠_梗阻",
+      "organ": "Duodenum",
+      "organ_zh": "十二指肠"
+    },
+    {
+      "english": "Duodenum_Ulcer",
+      "finding": "Ulcer",
+      "index": 8,
+      "key": "十二指肠_溃疡",
+      "organ": "Duodenum",
+      "organ_zh": "十二指肠"
+    },
+    {
+      "english": "Large bowel_Crohn's disease",
+      "finding": "Crohn's disease",
+      "index": 9,
+      "key": "大肠_克罗恩病",
+      "organ": "Large bowel",
+      "organ_zh": "大肠"
+    },
+    {
+      "english": "Large bowel_Mural calcification",
+      "finding": "Mural calcification",
+      "index": 10,
+      "key": "大肠_大肠（壁）钙化",
+      "organ": "Large bowel",
+      "organ_zh": "大肠"
+    },
+    {
+      "english": "Large bowel_Colitis",
+      "finding": "Colitis",
+      "index": 11,
+      "key": "大肠_急慢性（结）肠炎",
+      "organ": "Large bowel",
+      "organ_zh": "大肠"
+    },
+    {
+      "english": "Large bowel_Serosal surface irregularity",
+      "finding": "Serosal surface irregularity",
+      "index": 12,
+      "key": "大肠_浆膜面毛糙",
+      "organ": "Large bowel",
+      "organ_zh": "大肠"
+    },
+    {
+      "english": "Large bowel_Ulcerative colitis",
+      "finding": "Ulcerative colitis",
+      "index": 13,
+      "key": "大肠_溃疡性结肠炎",
+      "organ": "Large bowel",
+      "organ_zh": "大肠"
+    },
+    {
+      "english": "Large bowel_Rectal cancer",
+      "finding": "Rectal cancer",
+      "index": 14,
+      "key": "大肠_直肠癌",
+      "organ": "Large bowel",
+      "organ_zh": "大肠"
+    },
+    {
+      "english": "Large bowel_Gas and fluid accumulation",
+      "finding": "Gas and fluid accumulation",
+      "index": 15,
+      "key": "大肠_积液积气",
+      "organ": "Large bowel",
+      "organ_zh": "大肠"
+    },
+    {
+      "english": "Large bowel_Colon cancer",
+      "finding": "Colon cancer",
+      "index": 16,
+      "key": "大肠_结肠癌",
+      "organ": "Large bowel",
+      "organ_zh": "大肠"
+    },
+    {
+      "english": "Large bowel_Wall irregularity",
+      "finding": "Wall irregularity",
+      "index": 17,
+      "key": "大肠_肠壁毛糙",
+      "organ": "Large bowel",
+      "organ_zh": "大肠"
+    },
+    {
+      "english": "Large bowel_Wall edema",
+      "finding": "Wall edema",
+      "index": 18,
+      "key": "大肠_肠壁水肿",
+      "organ": "Large bowel",
+      "organ_zh": "大肠"
+    },
+    {
+      "english": "Large bowel_Intussusception",
+      "finding": "Intussusception",
+      "index": 19,
+      "key": "大肠_肠套叠",
+      "organ": "Large bowel",
+      "organ_zh": "大肠"
+    },
+    {
+      "english": "Large bowel_Diverticulum",
+      "finding": "Diverticulum",
+      "index": 20,
+      "key": "大肠_肠憩室",
+      "organ": "Large bowel",
+      "organ_zh": "大肠"
+    },
+    {
+      "english": "Large bowel_Obstruction",
+      "finding": "Obstruction",
+      "index": 21,
+      "key": "大肠_肠梗阻",
+      "organ": "Large bowel",
+      "organ_zh": "大肠"
+    },
+    {
+      "english": "Large bowel_Perforation",
+      "finding": "Perforation",
+      "index": 22,
+      "key": "大肠_肠穿孔",
+      "organ": "Large bowel",
+      "organ_zh": "大肠"
+    },
+    {
+      "english": "Large bowel_Dilatation",
+      "finding": "Dilatation",
+      "index": 23,
+      "key": "大肠_肠道扩张",
+      "organ": "Large bowel",
+      "organ_zh": "大肠"
+    },
+    {
+      "english": "Large bowel_Blurring of fat planes",
+      "finding": "Blurring of fat planes",
+      "index": 24,
+      "key": "大肠_脂肪间隙模糊",
+      "organ": "Large bowel",
+      "organ_zh": "大肠"
+    },
+    {
+      "english": "Large bowel_Appendicitis",
+      "finding": "Appendicitis",
+      "index": 25,
+      "key": "大肠_阑尾炎",
+      "organ": "Large bowel",
+      "organ_zh": "大肠"
+    },
+    {
+      "english": "Large bowel_Appendicolith",
+      "finding": "Appendicolith",
+      "index": 26,
+      "key": "大肠_阑尾粪石",
+      "organ": "Large bowel",
+      "organ_zh": "大肠"
+    },
+    {
+      "english": "Small bowel_Crohn's disease",
+      "finding": "Crohn's disease",
+      "index": 27,
+      "key": "小肠_克罗恩病",
+      "organ": "Small bowel",
+      "organ_zh": "小肠"
+    },
+    {
+      "english": "Small bowel_Intussusception",
+      "finding": "Intussusception",
+      "index": 28,
+      "key": "小肠_套叠",
+      "organ": "Small bowel",
+      "organ_zh": "小肠"
+    },
+    {
+      "english": "Small bowel_Volvulus",
+      "finding": "Volvulus",
+      "index": 29,
+      "key": "小肠_扭转",
+      "organ": "Small bowel",
+      "organ_zh": "小肠"
+    },
+    {
+      "english": "Small bowel_Obstruction",
+      "finding": "Obstruction",
+      "index": 30,
+      "key": "小肠_梗阻",
+      "organ": "Small bowel",
+      "organ_zh": "小肠"
+    },
+    {
+      "english": "Small bowel_Lymphoma",
+      "finding": "Lymphoma",
+      "index": 31,
+      "key": "小肠_淋巴瘤",
+      "organ": "Small bowel",
+      "organ_zh": "小肠"
+    },
+    {
+      "english": "Small bowel_Gas and fluid accumulation",
+      "finding": "Gas and fluid accumulation",
+      "index": 32,
+      "key": "小肠_积气积液",
+      "organ": "Small bowel",
+      "organ_zh": "小肠"
+    },
+    {
+      "english": "Small bowel_Mesenteric panniculitis",
+      "finding": "Mesenteric panniculitis",
+      "index": 33,
+      "key": "小肠_系膜指膜炎",
+      "organ": "Small bowel",
+      "organ_zh": "小肠"
+    },
+    {
+      "english": "Small bowel_Mesenteric lymphadenopathy",
+      "finding": "Mesenteric lymphadenopathy",
+      "index": 34,
+      "key": "小肠_系膜淋巴结肿大",
+      "organ": "Small bowel",
+      "organ_zh": "小肠"
+    },
+    {
+      "english": "Small bowel_Wall thickening",
+      "finding": "Wall thickening",
+      "index": 35,
+      "key": "小肠_肠壁增厚",
+      "organ": "Small bowel",
+      "organ_zh": "小肠"
+    },
+    {
+      "english": "Small bowel_Dilatation",
+      "finding": "Dilatation",
+      "index": 36,
+      "key": "小肠_肠管扩张",
+      "organ": "Small bowel",
+      "organ_zh": "小肠"
+    },
+    {
+      "english": "Small bowel_Lipoma",
+      "finding": "Lipoma",
+      "index": 37,
+      "key": "小肠_脂肪瘤",
+      "organ": "Small bowel",
+      "organ_zh": "小肠"
+    },
+    {
+      "english": "Small bowel_Gastrointestinal stromal tumor",
+      "finding": "Gastrointestinal stromal tumor",
+      "index": 38,
+      "key": "小肠_间质瘤（胃肠间质瘤-gist）",
+      "organ": "Small bowel",
+      "organ_zh": "小肠"
+    },
+    {
+      "english": "Small bowel_Enteritis",
+      "finding": "Enteritis",
+      "index": 39,
+      "key": "小肠_（急慢性）小肠炎",
+      "organ": "Small bowel",
+      "organ_zh": "小肠"
+    },
+    {
+      "english": "Heart_Pericardial effusion",
+      "finding": "Pericardial effusion",
+      "index": 40,
+      "key": "心脏_心包积液",
+      "organ": "Heart",
+      "organ_zh": "心脏"
+    },
+    {
+      "english": "Heart_Cardiomegaly",
+      "finding": "Cardiomegaly",
+      "index": 41,
+      "key": "心脏_心影（脏）增大",
+      "organ": "Heart",
+      "organ_zh": "心脏"
+    },
+    {
+      "english": "Rib_Metastasis",
+      "finding": "Metastasis",
+      "index": 42,
+      "key": "肋骨_转移瘤（乳腺癌 骨转移）",
+      "organ": "Rib",
+      "organ_zh": "肋骨"
+    },
+    {
+      "english": "Rib_Fracture",
+      "finding": "Fracture",
+      "index": 43,
+      "key": "肋骨_骨折",
+      "organ": "Rib",
+      "organ_zh": "肋骨"
+    },
+    {
+      "english": "Rib_Bone destruction",
+      "finding": "Bone destruction",
+      "index": 44,
+      "key": "肋骨_骨质破坏",
+      "organ": "Rib",
+      "organ_zh": "肋骨"
+    },
+    {
+      "english": "Liver_Hypoattenuating lesion",
+      "finding": "Hypoattenuating lesion",
+      "index": 45,
+      "key": "肝_低密度影",
+      "organ": "Liver",
+      "organ_zh": "肝"
+    },
+    {
+      "english": "Liver_Periportal edema",
+      "finding": "Periportal edema",
+      "index": 46,
+      "key": "肝_格林森鞘积液",
+      "organ": "Liver",
+      "organ_zh": "肝"
+    },
+    {
+      "english": "Liver_Lobar volume disproportion",
+      "finding": "Lobar volume disproportion",
+      "index": 47,
+      "key": "肝_比例失调",
+      "organ": "Liver",
+      "organ_zh": "肝"
+    },
+    {
+      "english": "Liver_Undulating contour",
+      "finding": "Undulating contour",
+      "index": 48,
+      "key": "肝_波浪状改变",
+      "organ": "Liver",
+      "organ_zh": "肝"
+    },
+    {
+      "english": "Liver_Cirrhosis",
+      "finding": "Cirrhosis",
+      "index": 49,
+      "key": "肝_硬化",
+      "organ": "Liver",
+      "organ_zh": "肝"
+    },
+    {
+      "english": "Liver_Nodular enhancement",
+      "finding": "Nodular enhancement",
+      "index": 50,
+      "key": "肝_结节状强化",
+      "organ": "Liver",
+      "organ_zh": "肝"
+    },
+    {
+      "english": "Liver_Intrahepatic bile duct dilatation",
+      "finding": "Intrahepatic bile duct dilatation",
+      "index": 51,
+      "key": "肝_肝内胆管扩张",
+      "organ": "Liver",
+      "organ_zh": "肝"
+    },
+    {
+      "english": "Liver_Hepatolithiasis",
+      "finding": "Hepatolithiasis",
+      "index": 52,
+      "key": "肝_肝内胆管结石",
+      "organ": "Liver",
+      "organ_zh": "肝"
+    },
+    {
+      "english": "Liver_Intrahepatic calcification",
+      "finding": "Intrahepatic calcification",
+      "index": 53,
+      "key": "肝_肝内钙化灶",
+      "organ": "Liver",
+      "organ_zh": "肝"
+    },
+    {
+      "english": "Liver_Cyst",
+      "finding": "Cyst",
+      "index": 54,
+      "key": "肝_肝囊肿",
+      "organ": "Liver",
+      "organ_zh": "肝"
+    },
+    {
+      "english": "Liver_Hepatocellular carcinoma",
+      "finding": "Hepatocellular carcinoma",
+      "index": 55,
+      "key": "肝_肝细胞癌",
+      "organ": "Liver",
+      "organ_zh": "肝"
+    },
+    {
+      "english": "Liver_Hyperattenuating lesion in intrahepatic bile ducts",
+      "finding": "Hyperattenuating lesion in intrahepatic bile ducts",
+      "index": 56,
+      "key": "肝_肝胆管内高密度影",
+      "organ": "Liver",
+      "organ_zh": "肝"
+    },
+    {
+      "english": "Liver_Hemangioma",
+      "finding": "Hemangioma",
+      "index": 57,
+      "key": "肝_肝血管瘤",
+      "organ": "Liver",
+      "organ_zh": "肝"
+    },
+    {
+      "english": "Liver_Intrahepatic cholangiocarcinoma",
+      "finding": "Intrahepatic cholangiocarcinoma",
+      "index": 58,
+      "key": "肝_胆管癌",
+      "organ": "Liver",
+      "organ_zh": "肝"
+    },
+    {
+      "english": "Liver_Steatotic liver disease",
+      "finding": "Steatotic liver disease",
+      "index": 59,
+      "key": "肝_脂肪肝",
+      "organ": "Liver",
+      "organ_zh": "肝"
+    },
+    {
+      "english": "Liver_Abscess",
+      "finding": "Abscess",
+      "index": 60,
+      "key": "肝_脓肿",
+      "organ": "Liver",
+      "organ_zh": "肝"
+    },
+    {
+      "english": "Liver_Metastasis",
+      "finding": "Metastasis",
+      "index": 61,
+      "key": "肝_转移瘤",
+      "organ": "Liver",
+      "organ_zh": "肝"
+    },
+    {
+      "english": "Liver_Irregular margin",
+      "finding": "Irregular margin",
+      "index": 62,
+      "key": "肝_边缘不规则",
+      "organ": "Liver",
+      "organ_zh": "肝"
+    },
+    {
+      "english": "Lung_Patchy opacity",
+      "finding": "Patchy opacity",
+      "index": 63,
+      "key": "肺_斑片影",
+      "organ": "Lung",
+      "organ_zh": "肺"
+    },
+    {
+      "english": "Lung_Pneumothorax",
+      "finding": "Pneumothorax",
+      "index": 64,
+      "key": "肺_气胸",
+      "organ": "Lung",
+      "organ_zh": "肺"
+    },
+    {
+      "english": "Lung_Nodule",
+      "finding": "Nodule",
+      "index": 65,
+      "key": "肺_结节",
+      "organ": "Lung",
+      "organ_zh": "肺"
+    },
+    {
+      "english": "Lung_Mass",
+      "finding": "Mass",
+      "index": 66,
+      "key": "肺_肺占位",
+      "organ": "Lung",
+      "organ_zh": "肺"
+    },
+    {
+      "english": "Lung_Pulmonary collapse",
+      "finding": "Pulmonary collapse",
+      "index": 67,
+      "key": "肺_肺萎陷",
+      "organ": "Lung",
+      "organ_zh": "肺"
+    },
+    {
+      "english": "Lung_Pleural effusion",
+      "finding": "Pleural effusion",
+      "index": 68,
+      "key": "肺_胸腔积液",
+      "organ": "Lung",
+      "organ_zh": "肺"
+    },
+    {
+      "english": "Lung_Atelectasis",
+      "finding": "Atelectasis",
+      "index": 69,
+      "key": "肺_膨胀不全",
+      "organ": "Lung",
+      "organ_zh": "肺"
+    },
+    {
+      "english": "Lung_Metastasis",
+      "finding": "Metastasis",
+      "index": 70,
+      "key": "肺_转移瘤",
+      "organ": "Lung",
+      "organ_zh": "肺"
+    },
+    {
+      "english": "Lung_Calcification",
+      "finding": "Calcification",
+      "index": 71,
+      "key": "肺_钙化灶",
+      "organ": "Lung",
+      "organ_zh": "肺"
+    },
+    {
+      "english": "Lung_Hyperattenuating opacity",
+      "finding": "Hyperattenuating opacity",
+      "index": 72,
+      "key": "肺_高密度影",
+      "organ": "Lung",
+      "organ_zh": "肺"
+    },
+    {
+      "english": "Kidney_Hypoattenuating lesion",
+      "finding": "Hypoattenuating lesion",
+      "index": 73,
+      "key": "肾_低密度影",
+      "organ": "Kidney",
+      "organ_zh": "肾"
+    },
+    {
+      "english": "Kidney_Cyst",
+      "finding": "Cyst",
+      "index": 74,
+      "key": "肾_囊肿",
+      "organ": "Kidney",
+      "organ_zh": "肾"
+    },
+    {
+      "english": "Kidney_Polycystic kidney disease",
+      "finding": "Polycystic kidney disease",
+      "index": 75,
+      "key": "肾_多囊肾",
+      "organ": "Kidney",
+      "organ_zh": "肾"
+    },
+    {
+      "english": "Kidney_Parenchymal thinning",
+      "finding": "Parenchymal thinning",
+      "index": 76,
+      "key": "肾_实质变薄",
+      "organ": "Kidney",
+      "organ_zh": "肾"
+    },
+    {
+      "english": "Kidney_Nonenhancing cystic lesion",
+      "finding": "Nonenhancing cystic lesion",
+      "index": 77,
+      "key": "肾_无强化囊性灶",
+      "organ": "Kidney",
+      "organ_zh": "肾"
+    },
+    {
+      "english": "Kidney_Renal artery aneurysm",
+      "finding": "Renal artery aneurysm",
+      "index": 78,
+      "key": "肾_肾动脉瘤",
+      "organ": "Kidney",
+      "organ_zh": "肾"
+    },
+    {
+      "english": "Kidney_Renal pelvic dilatation",
+      "finding": "Renal pelvic dilatation",
+      "index": 79,
+      "key": "肾_肾盂扩张",
+      "organ": "Kidney",
+      "organ_zh": "肾"
+    },
+    {
+      "english": "Kidney_Renal pelvic cancer",
+      "finding": "Renal pelvic cancer",
+      "index": 80,
+      "key": "肾_肾盂癌",
+      "organ": "Kidney",
+      "organ_zh": "肾"
+    },
+    {
+      "english": "Kidney_Hydronephrosis",
+      "finding": "Hydronephrosis",
+      "index": 81,
+      "key": "肾_肾盂积水",
+      "organ": "Kidney",
+      "organ_zh": "肾"
+    },
+    {
+      "english": "Kidney_Renal cell carcinoma",
+      "finding": "Renal cell carcinoma",
+      "index": 82,
+      "key": "肾_肾细胞癌（透明细胞癌）",
+      "organ": "Kidney",
+      "organ_zh": "肾"
+    },
+    {
+      "english": "Kidney_Atrophy",
+      "finding": "Atrophy",
+      "index": 83,
+      "key": "肾_肾萎缩",
+      "organ": "Kidney",
+      "organ_zh": "肾"
+    },
+    {
+      "english": "Kidney_Angiomyolipoma",
+      "finding": "Angiomyolipoma",
+      "index": 84,
+      "key": "肾_肾血管平滑肌脂肪瘤",
+      "organ": "Kidney",
+      "organ_zh": "肾"
+    },
+    {
+      "english": "Kidney_Nephrolithiasis",
+      "finding": "Nephrolithiasis",
+      "index": 85,
+      "key": "肾_肾（盂）结石",
+      "organ": "Kidney",
+      "organ_zh": "肾"
+    },
+    {
+      "english": "Kidney_Hyperattenuating lesion",
+      "finding": "Hyperattenuating lesion",
+      "index": 86,
+      "key": "肾_高密度影",
+      "organ": "Kidney",
+      "organ_zh": "肾"
+    },
+    {
+      "english": "Adrenal gland_Hyperplasia",
+      "finding": "Hyperplasia",
+      "index": 87,
+      "key": "肾上腺_增生",
+      "organ": "Adrenal gland",
+      "organ_zh": "肾上腺"
+    },
+    {
+      "english": "Adrenal gland_Nodule",
+      "finding": "Nodule",
+      "index": 88,
+      "key": "肾上腺_结节",
+      "organ": "Adrenal gland",
+      "organ_zh": "肾上腺"
+    },
+    {
+      "english": "Adrenal gland_Lipoma",
+      "finding": "Lipoma",
+      "index": 89,
+      "key": "肾上腺_脂肪瘤",
+      "organ": "Adrenal gland",
+      "organ_zh": "肾上腺"
+    },
+    {
+      "english": "Adrenal gland_Adenoma",
+      "finding": "Adenoma",
+      "index": 90,
+      "key": "肾上腺_腺瘤",
+      "organ": "Adrenal gland",
+      "organ_zh": "肾上腺"
+    },
+    {
+      "english": "Adrenal gland_Metastasis",
+      "finding": "Metastasis",
+      "index": 91,
+      "key": "肾上腺_转移瘤",
+      "organ": "Adrenal gland",
+      "organ_zh": "肾上腺"
+    },
+    {
+      "english": "Adrenal gland_Calcification",
+      "finding": "Calcification",
+      "index": 92,
+      "key": "肾上腺_钙化",
+      "organ": "Adrenal gland",
+      "organ_zh": "肾上腺"
+    },
+    {
+      "english": "Stomach_Wall edema",
+      "finding": "Wall edema",
+      "index": 93,
+      "key": "胃_壁水肿",
+      "organ": "Stomach",
+      "organ_zh": "胃"
+    },
+    {
+      "english": "Stomach_Dilatation",
+      "finding": "Dilatation",
+      "index": 94,
+      "key": "胃_扩张",
+      "organ": "Stomach",
+      "organ_zh": "胃"
+    },
+    {
+      "english": "Stomach_Gastric fundal varices",
+      "finding": "Gastric fundal varices",
+      "index": 95,
+      "key": "胃_胃底静脉曲张",
+      "organ": "Stomach",
+      "organ_zh": "胃"
+    },
+    {
+      "english": "Stomach_Ulcer",
+      "finding": "Ulcer",
+      "index": 96,
+      "key": "胃_胃溃疡",
+      "organ": "Stomach",
+      "organ_zh": "胃"
+    },
+    {
+      "english": "Stomach_Gastric cancer",
+      "finding": "Gastric cancer",
+      "index": 97,
+      "key": "胃_胃癌",
+      "organ": "Stomach",
+      "organ_zh": "胃"
+    },
+    {
+      "english": "Stomach_Gastrointestinal stromal tumor (GIST)",
+      "finding": "Gastrointestinal stromal tumor (GIST)",
+      "index": 98,
+      "key": "胃_间质瘤（gist）",
+      "organ": "Stomach",
+      "organ_zh": "胃"
+    },
+    {
+      "english": "Gallbladder_Cholecystolithiasis",
+      "finding": "Cholecystolithiasis",
+      "index": 99,
+      "key": "胆囊_结石",
+      "organ": "Gallbladder",
+      "organ_zh": "胆囊"
+    },
+    {
+      "english": "Gallbladder_Nodular stone-like hyperattenuating lesion",
+      "finding": "Nodular stone-like hyperattenuating lesion",
+      "index": 100,
+      "key": "胆囊_结节状致密影",
+      "organ": "Gallbladder",
+      "organ_zh": "胆囊"
+    },
+    {
+      "english": "Gallbladder_Distention",
+      "finding": "Distention",
+      "index": 101,
+      "key": "胆囊_胆囊增大",
+      "organ": "Gallbladder",
+      "organ_zh": "胆囊"
+    },
+    {
+      "english": "Gallbladder_Cholecystitis",
+      "finding": "Cholecystitis",
+      "index": 102,
+      "key": "胆囊_胆囊炎",
+      "organ": "Gallbladder",
+      "organ_zh": "胆囊"
+    },
+    {
+      "english": "Gallbladder_Gallbladder cancer",
+      "finding": "Gallbladder cancer",
+      "index": 103,
+      "key": "胆囊_胆囊癌",
+      "organ": "Gallbladder",
+      "organ_zh": "胆囊"
+    },
+    {
+      "english": "Gallbladder_Adenomyomatosis",
+      "finding": "Adenomyomatosis",
+      "index": 104,
+      "key": "胆囊_胆囊腺肌症",
+      "organ": "Gallbladder",
+      "organ_zh": "胆囊"
+    },
+    {
+      "english": "Gallbladder_Extrahepatic bile duct wall thickening",
+      "finding": "Extrahepatic bile duct wall thickening",
+      "index": 105,
+      "key": "胆囊_胆管壁增厚",
+      "organ": "Gallbladder",
+      "organ_zh": "胆囊"
+    },
+    {
+      "english": "Gallbladder_Extrahepatic bile duct dilatation",
+      "finding": "Extrahepatic bile duct dilatation",
+      "index": 106,
+      "key": "胆囊_胆管扩张",
+      "organ": "Gallbladder",
+      "organ_zh": "胆囊"
+    },
+    {
+      "english": "Gallbladder_Cholangitis",
+      "finding": "Cholangitis",
+      "index": 107,
+      "key": "胆囊_胆管炎",
+      "organ": "Gallbladder",
+      "organ_zh": "胆囊"
+    },
+    {
+      "english": "Gallbladder_Cholangiocarcinoma",
+      "finding": "Cholangiocarcinoma",
+      "index": 108,
+      "key": "胆囊_胆管癌",
+      "organ": "Gallbladder",
+      "organ_zh": "胆囊"
+    },
+    {
+      "english": "Gallbladder_Pneumobilia",
+      "finding": "Pneumobilia",
+      "index": 109,
+      "key": "胆囊_胆管积气",
+      "organ": "Gallbladder",
+      "organ_zh": "胆囊"
+    },
+    {
+      "english": "Gallbladder_Extrahepatic bile duct stone",
+      "finding": "Extrahepatic bile duct stone",
+      "index": 110,
+      "key": "胆囊_胆管结石",
+      "organ": "Gallbladder",
+      "organ_zh": "胆囊"
+    },
+    {
+      "english": "Gallbladder_Hyperattenuating lesion",
+      "finding": "Hyperattenuating lesion",
+      "index": 111,
+      "key": "胆囊_高密度影",
+      "organ": "Gallbladder",
+      "organ_zh": "胆囊"
+    },
+    {
+      "english": "Gallbladder_Xanthogranuloma",
+      "finding": "Xanthogranuloma",
+      "index": 112,
+      "key": "胆囊_黄色肉芽肿",
+      "organ": "Gallbladder",
+      "organ_zh": "胆囊"
+    },
+    {
+      "english": "Pancreas_Low-density lesion",
+      "finding": "Low-density lesion",
+      "index": 113,
+      "key": "胰腺_低密度影",
+      "organ": "Pancreas",
+      "organ_zh": "胰腺"
+    },
+    {
+      "english": "Pancreas_Cyst",
+      "finding": "Cyst",
+      "index": 114,
+      "key": "胰腺_囊肿",
+      "organ": "Pancreas",
+      "organ_zh": "胰腺"
+    },
+    {
+      "english": "Pancreas_Blurring of peripancreatic fat planes",
+      "finding": "Blurring of peripancreatic fat planes",
+      "index": 115,
+      "key": "胰腺_围脂肪间隙模糊",
+      "organ": "Pancreas",
+      "organ_zh": "胰腺"
+    },
+    {
+      "english": "Pancreas_Pancreatic cancer",
+      "finding": "Pancreatic cancer",
+      "index": 116,
+      "key": "胰腺_肿瘤或胰腺癌",
+      "organ": "Pancreas",
+      "organ_zh": "胰腺"
+    },
+    {
+      "english": "Pancreas_Peripancreatic pseudocyst",
+      "finding": "Peripancreatic pseudocyst",
+      "index": 117,
+      "key": "胰腺_胰周假性囊肿",
+      "organ": "Pancreas",
+      "organ_zh": "胰腺"
+    },
+    {
+      "english": "Pancreas_Pancreatic duct dilatation",
+      "finding": "Pancreatic duct dilatation",
+      "index": 118,
+      "key": "胰腺_胰管扩张",
+      "organ": "Pancreas",
+      "organ_zh": "胰腺"
+    },
+    {
+      "english": "Pancreas_Pancreatic duct calculus",
+      "finding": "Pancreatic duct calculus",
+      "index": 119,
+      "key": "胰腺_胰管结石",
+      "organ": "Pancreas",
+      "organ_zh": "胰腺"
+    },
+    {
+      "english": "Pancreas_Pancreatitis",
+      "finding": "Pancreatitis",
+      "index": 120,
+      "key": "胰腺_胰腺炎",
+      "organ": "Pancreas",
+      "organ_zh": "胰腺"
+    },
+    {
+      "english": "Pancreas_Enlargement",
+      "finding": "Enlargement",
+      "index": 121,
+      "key": "胰腺_胰腺饱满",
+      "organ": "Pancreas",
+      "organ_zh": "胰腺"
+    },
+    {
+      "english": "Pancreas_Atrophy",
+      "finding": "Atrophy",
+      "index": 122,
+      "key": "胰腺_萎缩",
+      "organ": "Pancreas",
+      "organ_zh": "胰腺"
+    },
+    {
+      "english": "Spleen_Hypoattenuating lesion",
+      "finding": "Hypoattenuating lesion",
+      "index": 123,
+      "key": "脾_低密度灶",
+      "organ": "Spleen",
+      "organ_zh": "脾"
+    },
+    {
+      "english": "Spleen_Accessory spleen",
+      "finding": "Accessory spleen",
+      "index": 124,
+      "key": "脾_副脾",
+      "organ": "Spleen",
+      "organ_zh": "脾"
+    },
+    {
+      "english": "Spleen_Cyst",
+      "finding": "Cyst",
+      "index": 125,
+      "key": "脾_囊肿",
+      "organ": "Spleen",
+      "organ_zh": "脾"
+    },
+    {
+      "english": "Spleen_Infarction",
+      "finding": "Infarction",
+      "index": 126,
+      "key": "脾_梗死",
+      "organ": "Spleen",
+      "organ_zh": "脾"
+    },
+    {
+      "english": "Spleen_Patchy hypoattenuating lesion",
+      "finding": "Patchy hypoattenuating lesion",
+      "index": 127,
+      "key": "脾_片状低密度区",
+      "organ": "Spleen",
+      "organ_zh": "脾"
+    },
+    {
+      "english": "Spleen_Splenomegaly",
+      "finding": "Splenomegaly",
+      "index": 128,
+      "key": "脾_脾大",
+      "organ": "Spleen",
+      "organ_zh": "脾"
+    },
+    {
+      "english": "Spleen_Lymphoma",
+      "finding": "Lymphoma",
+      "index": 129,
+      "key": "脾_脾脏淋巴瘤",
+      "organ": "Spleen",
+      "organ_zh": "脾"
+    },
+    {
+      "english": "Spleen_Calcification",
+      "finding": "Calcification",
+      "index": 130,
+      "key": "脾_钙化",
+      "organ": "Spleen",
+      "organ_zh": "脾"
+    },
+    {
+      "english": "Bladder_Diverticulum",
+      "finding": "Diverticulum",
+      "index": 131,
+      "key": "膀胱_憩室",
+      "organ": "Bladder",
+      "organ_zh": "膀胱"
+    },
+    {
+      "english": "Bladder_Stone",
+      "finding": "Stone",
+      "index": 132,
+      "key": "膀胱_结石",
+      "organ": "Bladder",
+      "organ_zh": "膀胱"
+    },
+    {
+      "english": "Bladder_Wall irregularity",
+      "finding": "Wall irregularity",
+      "index": 133,
+      "key": "膀胱_膀胱壁毛糙",
+      "organ": "Bladder",
+      "organ_zh": "膀胱"
+    },
+    {
+      "english": "Bladder_Cystitis",
+      "finding": "Cystitis",
+      "index": 134,
+      "key": "膀胱_膀胱炎",
+      "organ": "Bladder",
+      "organ_zh": "膀胱"
+    },
+    {
+      "english": "Bladder_Bladder cancer",
+      "finding": "Bladder cancer",
+      "index": 135,
+      "key": "膀胱_膀胱癌",
+      "organ": "Bladder",
+      "organ_zh": "膀胱"
+    },
+    {
+      "english": "Bladder_Soft-tissue attenuation lesion",
+      "finding": "Soft-tissue attenuation lesion",
+      "index": 136,
+      "key": "膀胱_软组织密度影",
+      "organ": "Bladder",
+      "organ_zh": "膀胱"
+    },
+    {
+      "english": "Portal vein_Dilatation",
+      "finding": "Dilatation",
+      "index": 137,
+      "key": "门静脉_增宽",
+      "organ": "Portal vein",
+      "organ_zh": "门静脉"
+    },
+    {
+      "english": "Portal vein_Thrombosis",
+      "finding": "Thrombosis",
+      "index": 138,
+      "key": "门静脉_栓塞",
+      "organ": "Portal vein",
+      "organ_zh": "门静脉"
+    },
+    {
+      "english": "Portal vein_Hypertension",
+      "finding": "Hypertension",
+      "index": 139,
+      "key": "门静脉_高压",
+      "organ": "Portal vein",
+      "organ_zh": "门静脉"
+    },
+    {
+      "english": "Esophagus_Dilated and tortuous tubular opacities",
+      "finding": "Dilated and tortuous tubular opacities",
+      "index": 140,
+      "key": "食管_增粗迂曲血管影",
+      "organ": "Esophagus",
+      "organ_zh": "食管"
+    },
+    {
+      "english": "Esophagus_Wall thickening",
+      "finding": "Wall thickening",
+      "index": 141,
+      "key": "食管_管壁增厚",
+      "organ": "Esophagus",
+      "organ_zh": "食管"
+    },
+    {
+      "english": "Esophagus_Hiatal hernia",
+      "finding": "Hiatal hernia",
+      "index": 142,
+      "key": "食管_裂孔疝",
+      "organ": "Esophagus",
+      "organ_zh": "食管"
+    },
+    {
+      "english": "Esophagus_Dilated and tortuous veins",
+      "finding": "Dilated and tortuous veins",
+      "index": 143,
+      "key": "食管_静脉扩张迂曲",
+      "organ": "Esophagus",
+      "organ_zh": "食管"
+    },
+    {
+      "english": "Esophagus_Varices",
+      "finding": "Varices",
+      "index": 144,
+      "key": "食管_静脉曲张",
+      "organ": "Esophagus",
+      "organ_zh": "食管"
+    },
+    {
+      "english": "Sacrum_Osteitis",
+      "finding": "Osteitis",
+      "index": 145,
+      "key": "骶骨_骨炎",
+      "organ": "Sacrum",
+      "organ_zh": "骶骨"
+    }
+  ],
+  "labels": [
+    {
+      "en": "background",
+      "label": 0,
+      "zh": "background"
+    },
+    {
+      "en": "adrenal gland",
+      "label": 1,
+      "zh": "肾上腺"
+    },
+    {
+      "en": "aorta",
+      "label": 2,
+      "zh": "主动脉"
+    },
+    {
+      "en": "erector spinae muscle",
+      "label": 3,
+      "zh": "竖脊肌"
+    },
+    {
+      "en": "brain",
+      "label": 4,
+      "zh": "脑"
+    },
+    {
+      "en": "clavicle",
+      "label": 5,
+      "zh": "锁骨"
+    },
+    {
+      "en": "large bowel",
+      "label": 6,
+      "zh": "大肠"
+    },
+    {
+      "en": "duodenum",
+      "label": 7,
+      "zh": "十二指肠"
+    },
+    {
+      "en": "esophagus",
+      "label": 8,
+      "zh": "食管"
+    },
+    {
+      "en": "face",
+      "label": 9,
+      "zh": "面部"
+    },
+    {
+      "en": "femur",
+      "label": 10,
+      "zh": "股骨"
+    },
+    {
+      "en": "gallbladder",
+      "label": 11,
+      "zh": "胆囊"
+    },
+    {
+      "en": "gluteus muscle",
+      "label": 12,
+      "zh": "臀肌"
+    },
+    {
+      "en": "heart",
+      "label": 13,
+      "zh": "心脏"
+    },
+    {
+      "en": "hip joint",
+      "label": 14,
+      "zh": "髋关节"
+    },
+    {
+      "en": "humerus",
+      "label": 15,
+      "zh": "肱骨"
+    },
+    {
+      "en": "iliac artery",
+      "label": 16,
+      "zh": "髂动脉"
+    },
+    {
+      "en": "iliac vena",
+      "label": 17,
+      "zh": "髂静脉"
+    },
+    {
+      "en": "iliopsoas muscle",
+      "label": 18,
+      "zh": "髂腰肌"
+    },
+    {
+      "en": "inferior vena cava",
+      "label": 19,
+      "zh": "下腔静脉"
+    },
+    {
+      "en": "kidney",
+      "label": 20,
+      "zh": "肾"
+    },
+    {
+      "en": "liver",
+      "label": 21,
+      "zh": "肝"
+    },
+    {
+      "en": "lung",
+      "label": 22,
+      "zh": "肺"
+    },
+    {
+      "en": "pancreas",
+      "label": 23,
+      "zh": "胰腺"
+    },
+    {
+      "en": "portal vein",
+      "label": 24,
+      "zh": "门静脉"
+    },
+    {
+      "en": "pulmonary artery",
+      "label": 25,
+      "zh": "肺动脉"
+    },
+    {
+      "en": "rib",
+      "label": 26,
+      "zh": "肋骨"
+    },
+    {
+      "en": "sacrum",
+      "label": 27,
+      "zh": "骶骨"
+    },
+    {
+      "en": "scapula",
+      "label": 28,
+      "zh": "肩胛骨"
+    },
+    {
+      "en": "small bowel",
+      "label": 29,
+      "zh": "小肠"
+    },
+    {
+      "en": "spleen",
+      "label": 30,
+      "zh": "脾"
+    },
+    {
+      "en": "stomach",
+      "label": 31,
+      "zh": "胃"
+    },
+    {
+      "en": "trachea",
+      "label": 32,
+      "zh": "气管"
+    },
+    {
+      "en": "bladder",
+      "label": 33,
+      "zh": "膀胱"
+    },
+    {
+      "en": "cervical vertebrae",
+      "label": 34,
+      "zh": "颈椎"
+    },
+    {
+      "en": "lumbar vertebrae",
+      "label": 35,
+      "zh": "腰椎"
+    },
+    {
+      "en": "thoracic vertebrae",
+      "label": 36,
+      "zh": "胸椎"
+    }
+  ],
+  "scored_organs": [
+    {
+      "finding_count": 4,
+      "label": 2,
+      "organ": "Aorta",
+      "organ_zh": "主动脉"
+    },
+    {
+      "finding_count": 5,
+      "label": 7,
+      "organ": "Duodenum",
+      "organ_zh": "十二指肠"
+    },
+    {
+      "finding_count": 18,
+      "label": 6,
+      "organ": "Large bowel",
+      "organ_zh": "大肠"
+    },
+    {
+      "finding_count": 13,
+      "label": 29,
+      "organ": "Small bowel",
+      "organ_zh": "小肠"
+    },
+    {
+      "finding_count": 2,
+      "label": 13,
+      "organ": "Heart",
+      "organ_zh": "心脏"
+    },
+    {
+      "finding_count": 3,
+      "label": 26,
+      "organ": "Rib",
+      "organ_zh": "肋骨"
+    },
+    {
+      "finding_count": 18,
+      "label": 21,
+      "organ": "Liver",
+      "organ_zh": "肝"
+    },
+    {
+      "finding_count": 10,
+      "label": 22,
+      "organ": "Lung",
+      "organ_zh": "肺"
+    },
+    {
+      "finding_count": 14,
+      "label": 20,
+      "organ": "Kidney",
+      "organ_zh": "肾"
+    },
+    {
+      "finding_count": 6,
+      "label": 1,
+      "organ": "Adrenal gland",
+      "organ_zh": "肾上腺"
+    },
+    {
+      "finding_count": 6,
+      "label": 31,
+      "organ": "Stomach",
+      "organ_zh": "胃"
+    },
+    {
+      "finding_count": 14,
+      "label": 11,
+      "organ": "Gallbladder",
+      "organ_zh": "胆囊"
+    },
+    {
+      "finding_count": 10,
+      "label": 23,
+      "organ": "Pancreas",
+      "organ_zh": "胰腺"
+    },
+    {
+      "finding_count": 8,
+      "label": 30,
+      "organ": "Spleen",
+      "organ_zh": "脾"
+    },
+    {
+      "finding_count": 6,
+      "label": 33,
+      "organ": "Bladder",
+      "organ_zh": "膀胱"
+    },
+    {
+      "finding_count": 3,
+      "label": 24,
+      "organ": "Portal vein",
+      "organ_zh": "门静脉"
+    },
+    {
+      "finding_count": 5,
+      "label": 8,
+      "organ": "Esophagus",
+      "organ_zh": "食管"
+    },
+    {
+      "finding_count": 1,
+      "label": 27,
+      "organ": "Sacrum",
+      "organ_zh": "骶骨"
+    }
+  ],
+  "source_commit": "0dbf0ece209b77d722588e5e7943014d3db48f7f"
+}

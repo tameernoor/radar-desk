@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jobs · radar-desk</title>
+</head>
+<body class="page">
+  <header class="topbar">
+    <a class="brand" href="/">radar-desk</a>
+    <nav>
+      <a href="/">Scans</a>
+      <a href="/jobs.html" aria-current="page">Jobs</a>
+    </nav>
+    <span class="research-tag">Research use only</span>
+    <button type="button" class="link" id="logout">Log out</button>
+  </header>
+  <main class="content">
+    <section aria-labelledby="jobs-title">
+      <div class="section-head">
+        <h2 id="jobs-title">Jobs</h2>
+        <a class="button" href="/export/scores.csv">Export all scores (CSV)</a>
+      </div>
+      <p class="status-line error" id="jobs-status" role="status" aria-live="polite"></p>
+      <div class="table-wrap">
+        <table class="grid" id="jobs-table">
+          <thead><tr>
+            <th>Job</th><th>Scan</th><th>State</th><th>Hold</th><th>Queued</th><th>Finished</th><th>Timings</th><th>GPU</th><th>Cost</th><th>Model</th><th></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="muted" id="jobs-empty" hidden>No jobs yet.</p>
+    </section>
+  </main>
+  <footer class="footer">
+    <p class="licence">Model: RADAR by Alibaba DAMO Academy, CC BY-NC-SA 4.0. Paper: "An expert-level generalist AI for abdominal CT diagnosis", Science 393(6817), doi 10.1126/science.aec6129. Weights: <a href="https://huggingface.co/radar-generalist/RADAR" rel="noopener">huggingface.co/radar-generalist/RADAR</a>.</p>
+    <p class="licence">From the model card: "The Radar model is currently intended for research purposes only. Further improvements and prospective clinical studies are still required before it can be used directly for clinical deployment." Not a medical device.</p>
+  </footer>
+  <script type="module" src="/src/jobs.js"></script>
+</body>
+</html>

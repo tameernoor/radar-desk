@@ -1,0 +1,18 @@
+{
+  "volume": "radar-weights",
+  "sources": {
+    "checkpoint_radar_pretrain.pth": "huggingface.co/radar-generalist/RADAR",
+    "bert-base-chinese/": "huggingface.co/radar-generalist/RADAR (folder bert-base-chinese/)",
+    "infer_text_embedding_radar.pt": "github.com/alibaba-damo-academy/damo-radar ckpt/ at commit 0dbf0ec; a copy is vendored at worker/vendor/damo-radar/ckpt/infer_text_embedding_radar.pt"
+  },
+  "files": [
+    {"path": "checkpoint_radar_pretrain.pth", "size": 1566049482, "sha256": "5e8b1b50b92162fcafcf8231e51ffbe9d1be2be52ccff4f967e4beb71e4499f4"},
+    {"path": "infer_text_embedding_radar.pt", "size": 346348, "sha256": "0ac960b0300c2ba10526e3bf500cd0c879fe5d9d15b9c49c17c34f0fc40e6cbe"},
+    {"path": "bert-base-chinese/config.json", "size": 656, "sha256": "35881a186f11f4d1860c7cfc7c9c5bfc004cc8734cbf162746113ca94bdbb629"},
+    {"path": "bert-base-chinese/config_decoder.json", "size": 711, "sha256": "d7b77554b4c76020446ce2f6c9f05df03d64995d918328544ea5dbe857792298"},
+    {"path": "bert-base-chinese/pytorch_model.bin", "size": 411577189, "sha256": "8a693db616eaf647ed2bfe531e1fa446637358fc108a8bf04e8d4db17e837ee9"},
+    {"path": "bert-base-chinese/tokenizer.json", "size": 268943, "sha256": "55c5edcfb8936895e019b2d8f97dcb547734f25b29f95009155f4c8c15649aae"},
+    {"path": "bert-base-chinese/tokenizer_config.json", "size": 49, "sha256": "0f6d13e6f4da6f9e24f22ada6bc3be571123d858d7c0c05a8a7cd55a9c23c2e8"},
+    {"path": "bert-base-chinese/vocab.txt", "size": 109540, "sha256": "45bbac6b341c319adc98a532532882e91a9cefc0329aa57bac9ae761c27b291c"}
+  ]
+}
