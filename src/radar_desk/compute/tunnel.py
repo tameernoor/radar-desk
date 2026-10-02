@@ -79,7 +79,8 @@ def alive(pid: int | None, binary: str) -> bool:
         return False
     except PermissionError:
         pass
-    ps = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True,
+    # -ww: no width limit; Linux procps cuts the line at 80 columns when not on a terminal.
+    ps = subprocess.run(["ps", "-ww", "-o", "command=", "-p", str(pid)], capture_output=True, text=True,
                         check=False)
     command = ps.stdout.strip()
     return bool(command) and Path(command.split()[0]).name == Path(binary).name and " tunnel " in command

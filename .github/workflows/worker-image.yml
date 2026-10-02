@@ -1,8 +1,12 @@
 name: worker image
 
+# Every build publishes :<commit sha>; builds from main also move :latest. A tag worker-vX.Y also
+# publishes :X.Y, the version pods pin through WORKER_IMAGE. :0.1 is the first image (commit 28b3c8d);
+# never tag worker-v0.1, it would overwrite it.
 on:
   workflow_dispatch:
   push:
+    tags: ["worker-v*"]
     branches: [main]
     paths:
       - "worker/**"
@@ -14,7 +18,7 @@ permissions:
   packages: write
 
 concurrency:
-  group: worker-image
+  group: worker-image-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -34,12 +38,20 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - id: tags
+        run: |
+          image=ghcr.io/${{ github.repository_owner }}/radar-worker
+          {
+            echo "list<<EOF"
+            if [[ "$GITHUB_REF" == refs/heads/main ]]; then echo "$image:latest"; fi
+            echo "$image:${{ github.sha }}"
+            if [[ "$GITHUB_REF" == refs/tags/worker-v* ]]; then echo "$image:${GITHUB_REF#refs/tags/worker-v}"; fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
           context: .
           file: worker/docker/Dockerfile
           platforms: linux/amd64
           push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/radar-worker:0.1
-            ghcr.io/${{ github.repository_owner }}/radar-worker:${{ github.sha }}
+          tags: ${{ steps.tags.outputs.list }}
