@@ -1,8 +1,6 @@
 # radar-desk
 
-**Part of aotn**, a series of small example projects. This one goes with the article "What the Reports Already Knew", about RADAR, the abdominal CT model Alibaba DAMO Academy published in Science in 2026.
-
-radar-desk runs RADAR on a CT scan and shows its 146 finding scores next to the image, with RADAR's own organ outlines on top. A chat panel answers questions about the scores and moves the viewer.
+radar-desk runs RADAR, the abdominal CT model Alibaba DAMO Academy published in Science in 2026, on a CT scan and shows its 146 finding scores next to the image, with RADAR's own organ outlines on top. A chat panel answers questions about the scores and moves the viewer.
 
 Research use only. Public and research scans only. This is not a medical device.
 
