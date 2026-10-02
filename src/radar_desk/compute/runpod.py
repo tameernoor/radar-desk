@@ -1,4 +1,9 @@
-"""RunPod over its GraphQL and REST APIs: deploy one worker pod, list pods and spend, delete a pod.
+"""RunPod over its v2 REST API: deploy one worker pod, list pods and their hourly cost, delete a pod.
+
+RunPodApi is the bare v2 client (base URL, auth, problem JSON errors) and takes another base URL so other
+RunPod products can reuse it. RunPod is the pod layer the compute service drives. A create that RunPod
+answers with 400 counts as no stock for that GPU type, because v2 gives capacity exhaustion no code of its
+own; the deploy loop then retries and moves on to the next GPU type.
 
 Every request carries a named User-Agent; RunPod answers a default Python one with 403.
 """
@@ -6,15 +11,16 @@ Every request carries a named User-Agent; RunPod answers a default Python one wi
 from __future__ import annotations
 
 import logging
+import shlex
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError, version
+from typing import Any
 
 import httpx
 
-GRAPHQL_URL = "https://api.runpod.io/graphql"
-REST_URL = "https://rest.runpod.io/v1"
+API_URL = "https://api.runpod.io/v2"
 DEFAULT_GPUS = "NVIDIA L4,NVIDIA GeForce RTX 4090"
 GPU_PREFERENCE = tuple(DEFAULT_GPUS.split(","))
 # The image's torch 2.5.1/cu124 cannot drive Blackwell parts; parse_gpus refuses any id holding one of these,
@@ -29,20 +35,11 @@ KNOWN_GPUS = frozenset({
     "NVIDIA RTX 4000 Ada Generation", "NVIDIA RTX 6000 Ada Generation", "NVIDIA A100 80GB PCIe",
     "NVIDIA A100-SXM4-80GB", "NVIDIA H100 PCIe", "NVIDIA H100 80GB HBM3",
 })
-STOCK_MESSAGES = ("SUPPLY_CONSTRAINT", "no longer any instances available")
 
 try:
     USER_AGENT = f"radar-desk-compute/{version('radar-desk')}"
 except PackageNotFoundError:
     USER_AGENT = "radar-desk-compute/unknown"
-
-DEPLOY = """mutation($input: PodFindAndDeployOnDemandInput!) {
-  podFindAndDeployOnDemand(input: $input) { id name imageName costPerHr desiredStatus
-    machine { gpuDisplayName } }
-}"""
-MYSELF = """query { myself { currentSpendPerHr pods { id name imageName desiredStatus costPerHr
-  runtime { uptimeInSeconds } machine { gpuDisplayName } } } }"""
-
 
 log = logging.getLogger(__name__)
 
@@ -68,11 +65,47 @@ def parse_gpus(value: str, warn: bool = False) -> list[str]:
 
 
 class RunPodError(RuntimeError):
-    """RunPod refused a call. The message is RunPod's first error message."""
+    """RunPod refused a call. `status` is the HTTP status when there was one, `detail` RunPod's explanation."""
+
+    def __init__(self, message: str, status: int | None = None, detail: str | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+        self.detail = message if detail is None else detail
 
 
 class StockError(RunPodError):
     """No machine with the requested GPU type is free right now."""
+
+
+class RunPodApi:
+    """RunPod's v2 REST API: bearer auth, a named User-Agent, problem JSON turned into RunPodError."""
+
+    def __init__(self, api_key: str, client: httpx.Client | None = None, base_url: str = API_URL) -> None:
+        self.client = client or httpx.Client(timeout=30)
+        self.base_url = base_url.rstrip("/")
+        self.headers = {"Authorization": f"Bearer {api_key}", "User-Agent": USER_AGENT}
+
+    def call(self, method: str, path: str, json: Any = None, params: dict | None = None) -> Any:
+        """The parsed JSON body of a 2xx answer, None when it is empty. Any other answer raises RunPodError.
+
+        A transport failure raises httpx.HTTPError as it is. Messages never carry the key or the headers.
+        """
+        r = self.client.request(method, f"{self.base_url}{path}", json=json, params=params, headers=self.headers)
+        try:
+            body = r.json() if r.content else None
+        except ValueError:
+            body = ValueError
+        if r.is_success:
+            if body is ValueError:
+                raise RunPodError(f"RunPod answered {r.status_code} without JSON", r.status_code)
+            return body
+        detail = body.get("detail") if isinstance(body, dict) else None
+        if isinstance(detail, str) and detail:
+            errors = body.get("errors")
+            if isinstance(errors, list) and errors:
+                detail = f"{detail}: {'; '.join(str(e) for e in errors)}"
+            raise RunPodError(f"RunPod answered {r.status_code}: {detail}", r.status_code, detail)
+        raise RunPodError(f"RunPod answered {r.status_code}", r.status_code)
 
 
 @dataclass
@@ -81,7 +114,7 @@ class Pod:
     name: str
     gpu: str
     cost_per_hr: float
-    desired_status: str
+    status: str
     uptime_s: int | None = None
     image: str = ""
 
@@ -100,81 +133,84 @@ class PodSpec:
     cloud_type: str = "SECURE"
     gpu_count: int = 1
 
-    def input(self, gpu_type: str) -> dict:
+    def body(self, gpu_type: str) -> dict:
+        """The POST /v2/pods body. `cmd` is the argument list for the image's ENTRYPOINT."""
         return {
-            "cloudType": self.cloud_type, "gpuCount": self.gpu_count, "gpuTypeId": gpu_type,
-            "dataCenterId": self.datacenter, "networkVolumeId": self.volume_id,
-            "volumeMountPath": self.mount_path, "containerDiskInGb": self.container_disk_gb, "volumeInGb": 0,
-            "imageName": self.image, "containerRegistryAuthId": self.registry_auth_id,
-            "dockerArgs": self.docker_args, "name": self.name,
-            "env": [{"key": k, "value": v} for k, v in self.env.items()],
+            "name": self.name, "image": self.image, "registry": self.registry_auth_id, "cloud": self.cloud_type,
+            "gpu": {"id": gpu_type, "count": self.gpu_count}, "dataCenterIds": [self.datacenter],
+            "mounts": {"network": [{"volumeId": self.volume_id, "path": self.mount_path}]},
+            "disk": self.container_disk_gb, "cmd": shlex.split(self.docker_args), "env": dict(self.env),
         }
 
 
 def _pod(raw: dict, gpu: str = "") -> Pod:
-    machine = raw.get("machine") or {}
+    found = raw.get("gpu") or {}
     runtime = raw.get("runtime") or {}
-    return Pod(id=raw["id"], name=raw.get("name") or "", gpu=machine.get("gpuDisplayName") or gpu,
-               cost_per_hr=float(raw.get("costPerHr") or 0), desired_status=raw.get("desiredStatus") or "",
-               uptime_s=runtime.get("uptimeInSeconds"), image=raw.get("imageName") or "")
+    return Pod(id=raw["id"], name=raw.get("name") or "", gpu=found.get("id") or gpu,
+               cost_per_hr=float(raw.get("cost") or 0), status=raw.get("status") or "",
+               uptime_s=runtime.get("uptime"), image=raw.get("image") or "")
 
 
 class RunPod:
     def __init__(self, api_key: str, client: httpx.Client | None = None,
                  sleep: Callable[[float], None] = time.sleep) -> None:
-        self.client = client or httpx.Client(timeout=30)
-        self.headers = {"Authorization": f"Bearer {api_key}", "User-Agent": USER_AGENT}
+        self.api = RunPodApi(api_key, client)
         self.sleep = sleep
-
-    def graphql(self, query: str, variables: dict | None = None) -> dict:
-        r = self.client.post(GRAPHQL_URL, json={"query": query, "variables": variables or {}},
-                             headers=self.headers)
-        try:
-            body = r.json()
-        except ValueError:
-            raise RunPodError(f"RunPod GraphQL answered {r.status_code}") from None
-        errors = body.get("errors") if isinstance(body, dict) else None
-        if errors:
-            message = str(errors[0].get("message", errors[0]))
-            raise (StockError if any(s in message for s in STOCK_MESSAGES) else RunPodError)(message)
-        if r.status_code != 200 or not isinstance(body, dict) or "data" not in body:
-            raise RunPodError(f"RunPod GraphQL answered {r.status_code}")
-        return body["data"]
 
     def deploy(self, spec: PodSpec, gpus: Sequence[str] = GPU_PREFERENCE, attempts: int = 3,
                wait_s: float = 20) -> Pod:
-        """Deploy on the first GPU type in `gpus` that has stock, retrying a stock error `attempts` times."""
+        """Deploy on the first GPU type in `gpus` that has stock, retrying a 400 `attempts` times per type."""
+        last = ""
         for gpu in gpus:
             for attempt in range(attempts):
                 try:
-                    raw = self.graphql(DEPLOY, {"input": spec.input(gpu)})["podFindAndDeployOnDemand"]
-                    if not raw:
-                        raise RunPodError("deploy returned no pod")
-                    return _pod(raw, gpu)
-                except StockError:
+                    raw = self.api.call("POST", "/pods", json=spec.body(gpu))
+                except RunPodError as exc:
+                    if exc.status != 400:
+                        raise
+                    last = exc.detail
+                    log.warning("RunPod has no %s: %s", gpu, last)
                     if attempt < attempts - 1:
                         self.sleep(wait_s)
-        raise StockError(f"no stock for {', '.join(gpus)}")
-
-    def _myself(self) -> dict:
-        return self.graphql(MYSELF)["myself"]
+                    continue
+                if not isinstance(raw, dict) or not raw.get("id"):
+                    raise RunPodError("deploy returned no pod")
+                return _pod(raw, gpu)
+        raise StockError(f"no stock for {', '.join(gpus)}: {last}", 400, last)
 
     def pods(self) -> list[Pod]:
-        return [_pod(p) for p in self._myself().get("pods") or []]
+        found: list[Pod] = []
+        params: dict = {"limit": 1000}
+        while True:
+            page = self.api.call("GET", "/pods", params=params) or {}
+            found += [_pod(p) for p in page.get("pods") or []]
+            more = page.get("pagination") or {}
+            if not (more.get("hasNextPage") and more.get("nextCursor")):
+                return found
+            params = {"limit": 1000, "cursor": more["nextCursor"]}
 
     def pod(self, pod_id: str) -> Pod | None:
-        return next((p for p in self.pods() if p.id == pod_id), None)
+        try:
+            raw = self.api.call("GET", f"/pods/{pod_id}")
+        except RunPodError as exc:
+            if exc.status == 404:
+                return None
+            raise
+        return _pod(raw) if isinstance(raw, dict) and raw.get("id") else None
 
     def spend_per_hr(self) -> float:
-        return float(self._myself().get("currentSpendPerHr") or 0)
+        """The summed hourly cost of this account's pods. v2 has no live account rate, so serverless
+        workers and network volumes are not in it."""
+        return sum(p.cost_per_hr for p in self.pods())
 
     def delete(self, pod_id: str) -> bool:
         """Delete a pod; False when RunPod no longer has it, also after a failed delete."""
-        r = self.client.delete(f"{REST_URL}/pods/{pod_id}", headers=self.headers)
-        if r.status_code == 404:
-            return False
-        if r.status_code not in (200, 204):
-            if self.pod(pod_id) is None:
+        try:
+            self.api.call("DELETE", f"/pods/{pod_id}")
+        except RunPodError as exc:
+            if exc.status is not None and 200 <= exc.status < 300:  # deleted, with a body that is not JSON
+                return True
+            if exc.status == 404 or (exc.status is not None and self.pod(pod_id) is None):
                 return False
-            raise RunPodError(f"DELETE pod {pod_id} answered {r.status_code}")
+            raise
         return True

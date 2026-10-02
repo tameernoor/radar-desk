@@ -5,7 +5,7 @@ import { computePhrase, fromGpuStatus, workerUrl } from "../src/compute.js";
 const NOW = Date.parse("2026-10-02T12:00:00Z");
 const at = (secondsAgo) => new Date(NOW - secondsAgo * 1000).toISOString();
 const base = { mode: "worker", changeable: true, runpod: { configured: true }, pod: null, in_flight: null, queued: 0, held: [], problem: null };
-const pod = (extra) => ({ id: "pod_1", runpod_id: "rp123", gpu: "NVIDIA L4", cost_per_hr: 0.39, created_at: at(200), started_at: at(150), job_id: null, stops_in_s: null, ...extra });
+const pod = (extra) => ({ id: "pod_1", runpod_id: "rp123", gpu: "NVIDIA L4", cost_per_hr: 0.39, created_at: at(200), started_at: at(150), job_id: null, idle_s: null, idle_delete_s: 600, ...extra });
 const phrase = (s) => computePhrase({ ...base, ...s }, NOW);
 
 test("modal names the requested GPUs", () => {
@@ -40,9 +40,10 @@ test("pod ready and scoring names the scan", () => {
   expect(phrase({ ...s, scan: null }).text).toBe("Pod rp123, NVIDIA L4, $0.39/h, up 2:30, scoring job_abcd");
 });
 
-test("pod ready and idle says when it stops", () => {
-  expect(phrase({ pod: pod({ phase: "ready", stops_in_s: 361 }) })).toEqual({ text: "Pod rp123, NVIDIA L4, $0.39/h, idle, stops in 7 min", tone: "busy" });
-  expect(phrase({ pod: pod({ phase: "ready" }) }).text).toBe("Pod rp123, NVIDIA L4, $0.39/h, idle");
+test("pod ready and idle says how long and when it deletes itself", () => {
+  expect(phrase({ pod: pod({ phase: "ready", idle_s: 179 }) })).toEqual({ text: "Pod rp123, NVIDIA L4, $0.39/h, idle 2 min, deletes itself after 10 idle min", tone: "busy" });
+  expect(phrase({ pod: pod({ phase: "ready" }) }).text).toBe("Pod rp123, NVIDIA L4, $0.39/h, idle, deletes itself after 10 idle min");
+  expect(phrase({ pod: pod({ phase: "ready", idle_s: 0, idle_delete_s: undefined }) }).text).toBe("Pod rp123, NVIDIA L4, $0.39/h, idle 0 min");
 });
 
 test("a job running elsewhere is named", () => {
@@ -87,8 +88,8 @@ test("the scans strip's gpu_status maps onto the same phrase", () => {
 });
 
 test("mode modal with a pod still draining names the pod", () => {
-  const g = { backend: "modal", compute_mode: "modal", runpod_configured: true, gpu_requested: ["L4"], pod: pod({ phase: "ready", stops_in_s: 0 }), in_flight: null, queued: [], held: [] };
-  expect(computePhrase(fromGpuStatus(g), NOW)).toEqual({ text: "Pod rp123, NVIDIA L4, $0.39/h, idle, stops in 0 min", tone: "busy" });
+  const g = { backend: "modal", compute_mode: "modal", runpod_configured: true, gpu_requested: ["L4"], pod: pod({ phase: "ready", idle_s: 0 }), in_flight: null, queued: [], held: [] };
+  expect(computePhrase(fromGpuStatus(g), NOW)).toEqual({ text: "Pod rp123, NVIDIA L4, $0.39/h, idle 0 min, deletes itself after 10 idle min", tone: "busy" });
 });
 
 test("worker URL: managed tunnel of the pod, fixed URL, nothing on modal", () => {

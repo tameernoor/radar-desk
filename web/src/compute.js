@@ -18,8 +18,9 @@ export function computePhrase(s, nowMs) {
     podScoring = true;
     text = `Pod ${pod.runpod_id}, ${pod.gpu}, ${rate(pod.cost_per_hr)}, up ${elapsed(pod.started_at, now)}, scoring ${s.scan || shortId(pod.job_id)}`;
   } else if (pod) {
-    const stops = pod.stops_in_s == null ? "" : `, stops in ${Math.max(0, Math.ceil(pod.stops_in_s / 60))} min`;
-    text = `Pod ${pod.runpod_id}, ${pod.gpu}, ${rate(pod.cost_per_hr)}, idle${stops}`;
+    const idle = pod.idle_s == null ? "" : ` ${Math.floor(pod.idle_s / 60)} min`;
+    const deletes = pod.idle_delete_s == null ? "" : `, deletes itself after ${Math.round(pod.idle_delete_s / 60)} idle min`;
+    text = `Pod ${pod.runpod_id}, ${pod.gpu}, ${rate(pod.cost_per_hr)}, idle${idle}${deletes}`;
   } else if (s.mode === "modal") text = `Modal, ${(s.gpus || []).join(" or ") || "GPU"}, scales to zero`;
   else if (s.mode === "worker" && !s.runpod?.configured) text = "Worker backend, no RunPod keys, workers are started by hand";
   else if (s.mode === "worker") text = "RunPod, no pod, starts when a job is queued";

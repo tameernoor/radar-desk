@@ -37,7 +37,7 @@ class Clock:
 
 
 class FakeRunPod:
-    """RunPod's GraphQL and REST endpoints over httpx.MockTransport."""
+    """RunPod's v2 pod endpoints over httpx.MockTransport."""
 
     def __init__(self) -> None:
         self.pods: list[dict] = []
@@ -48,38 +48,46 @@ class FakeRunPod:
         self.down = False
         self.lose_answer = False  # the pod is created but the answer is a 504
         self.fail_deletes = 0  # answer 500 to this many deletes
-        self.no_price = False  # the deploy answer has costPerHr null
+        self.no_price = False  # the create answer has no cost
 
     def add(self, pod_id: str, name: str = "radar-worker") -> None:
-        self.pods.append({"id": pod_id, "name": name, "imageName": IMAGE, "costPerHr": 0.39,
-                          "desiredStatus": "RUNNING", "runtime": None, "machine": {"gpuDisplayName": "L4"}})
+        self.pods.append({"id": pod_id, "name": name, "image": IMAGE, "cost": 0.39, "status": "RUNNING",
+                          "runtime": None, "gpu": {"id": "NVIDIA L4", "count": 1, "vcpuCount": 4, "memory": 24}})
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         assert request.headers["user-agent"].startswith("radar-desk-compute/")
+        assert request.url.path.startswith("/v2/pods")
         if self.down:
             return httpx.Response(503, text="down")
+        pod_id = request.url.path.removeprefix("/v2/pods").strip("/")
         if request.method == "DELETE":
-            pod_id = request.url.path.rsplit("/", 1)[1]
             if self.fail_deletes:
                 self.fail_deletes -= 1
                 return httpx.Response(500)
             self.deleted.append(pod_id)
             before = len(self.pods)
             self.pods = [p for p in self.pods if p["id"] != pod_id]
-            return httpx.Response(200 if len(self.pods) < before else 404)
-        body = json.loads(request.content)
-        if "podFindAndDeployOnDemand" in body["query"]:
-            inp = body["variables"]["input"]
-            self.requested.append(inp["gpuTypeId"])
+            if len(self.pods) < before:
+                return httpx.Response(204)
+            return httpx.Response(404, json={"title": "Not Found", "status": 404, "detail": "pod not found"})
+        if request.method == "POST":
+            body = json.loads(request.content)
+            self.requested.append(body["gpu"]["id"])
             if self.stock:
-                return httpx.Response(200, json={"errors": [{"message": "SUPPLY_CONSTRAINT"}]})
-            self.deployed.append(inp)
-            self.add(f"rp{len(self.deployed)}", inp["name"])
+                return httpx.Response(400, json={"title": "Bad Request", "status": 400,
+                                                 "detail": "no instances available"})
+            self.deployed.append(body)
+            self.add(f"rp{len(self.deployed)}", body["name"])
             if self.lose_answer:
                 return httpx.Response(504, text="gateway timeout")
-            answer = {**self.pods[-1], "costPerHr": None} if self.no_price else self.pods[-1]
-            return httpx.Response(200, json={"data": {"podFindAndDeployOnDemand": answer}})
-        return httpx.Response(200, json={"data": {"myself": {"currentSpendPerHr": 0, "pods": self.pods}}})
+            answer = {k: v for k, v in self.pods[-1].items() if k != "cost"} if self.no_price else self.pods[-1]
+            return httpx.Response(201, json=answer)
+        if pod_id:
+            found = next((p for p in self.pods if p["id"] == pod_id), None)
+            if found is None:
+                return httpx.Response(404, json={"title": "Not Found", "status": 404, "detail": "pod not found"})
+            return httpx.Response(200, json=found)
+        return httpx.Response(200, json={"pods": self.pods, "pagination": {"nextCursor": None, "hasNextPage": False}})
 
 
 class FakeTunnel:
@@ -251,14 +259,15 @@ def test_managed_start_from_a_queued_job_to_ready(world):
     world.probe.up = True
     world.tick(10)
     pod = world.pod
-    assert pod.phase == "starting" and pod.runpod_id == "rp1" and pod.gpu == "L4" and pod.cost_per_hr == 0.39
+    assert pod.phase == "starting" and pod.runpod_id == "rp1" and pod.gpu == "NVIDIA L4" and pod.cost_per_hr == 0.39
     assert world.probe.calls[-1] == pod.tunnel_url
     [inp] = world.rp.deployed
-    env = {e["key"]: e["value"] for e in inp["env"]}
+    env = inp["env"]
     assert env["RADAR_DESK_URL"] == pod.tunnel_url and env["RADAR_WORKER_ID"] == pod.worker_id
     assert env["RADAR_IMAGE"] == IMAGE and env["RADAR_WORKER_TOKEN"].startswith("rdw_")
-    assert inp["gpuTypeId"] == "NVIDIA L4" and inp["dataCenterId"] == "EU-RO-1"
-    assert inp["networkVolumeId"] == "vol-1"
+    assert env["RADAR_POD_IDLE_DELETE_S"] == "600" and env["RADAR_POD_APP_LOST_DELETE_S"] == "600"
+    assert inp["gpu"] == {"id": "NVIDIA L4", "count": 1} and inp["dataCenterIds"] == ["EU-RO-1"]
+    assert inp["mounts"] == {"network": [{"volumeId": "vol-1", "path": "/workspace"}]}
     token = world.svc.db.get_worker_token(pod.token_id)
     assert token.name == f"pod {pod.id}" and token.revoked_at is None
     assert world.svc.workers.authenticate(env["RADAR_WORKER_TOKEN"]).id == pod.token_id
@@ -270,20 +279,21 @@ def test_managed_start_from_a_queued_job_to_ready(world):
     world.tick(10)
     assert world.pod.phase == "ready" and world.pod.ready_at == "2026-10-15T12:00:40.000000Z"
     view = world.compute.status()["pod"]
-    assert view["job_id"] == job_id and view["tunnel_alive"] is True and view["stops_in_s"] is None
+    assert view["job_id"] == job_id and view["tunnel_alive"] is True and view["idle_delete_s"] == 600
     assert world.compute.status()["in_flight"] == {"job_id": job_id, "backend": "worker"}
 
 
 def test_external_start_uses_the_public_url(tmp_path):
-    w = World(tmp_path, worker_public_url=PUBLIC)
+    w = World(tmp_path, worker_public_url=PUBLIC, radar_pod_idle_delete_s=900, radar_pod_app_lost_delete_s=300.7)
     w.queue()
     w.tick()
     assert w.pod.phase == "tunnel" and w.pod.tunnel_url == PUBLIC and w.pod.tunnel is None
     assert w.tunnel.started == []
     w.tick()
     assert w.pod.phase == "starting" and w.probe.calls == [PUBLIC]
-    env = {e["key"]: e["value"] for e in w.rp.deployed[0]["env"]}
+    env = w.rp.deployed[0]["env"]
     assert env["RADAR_DESK_URL"] == PUBLIC
+    assert env["RADAR_POD_IDLE_DELETE_S"] == "900" and env["RADAR_POD_APP_LOST_DELETE_S"] == "300"
     assert w.compute.status()["pod"]["tunnel_alive"] is None
     assert w.compute.status()["tunnel_mode"] == "external"
 
@@ -317,22 +327,46 @@ def test_a_tunnel_that_does_not_start_is_a_problem_and_retried(world):
 # Stopping
 
 
-def test_idle_stop_after_ten_minutes(world):
+def test_the_app_does_not_stop_an_idle_pod(world):
+    """The pod deletes itself when idle; the app only closes it at the hour cap."""
     claim = world.ready()
     world.tick(60)
     world.finish(claim)
     pod = world.pod
-    assert world.compute.status()["pod"]["stops_in_s"] == 600
-    world.idle(599)
+    world.idle(600)
+    view = world.compute.status()["pod"]
+    assert view["idle_s"] == 600 and view["idle_delete_s"] == 600
+    world.idle(3600)
+    assert world.pod is not None and world.rp.deleted == []
+    world.idle(3 * 3600 - 60 - 600 - 3600 - 60)
     assert world.pod is not None
-    world.idle(1)
+    world.idle(60)
     assert world.pod is None
     stopped = world.svc.db.get_pod(pod.id)
-    assert stopped.reason == "idle" and stopped.phase == "stopped"
-    assert world.rp.deleted == ["rp1"] and world.rp.pods == []
-    assert world.svc.db.get_worker_token(pod.token_id).revoked_at is not None
+    assert stopped.reason == "cap" and stopped.phase == "stopped"
+    assert world.rp.deleted == ["rp1"] and world.tunnel.stopped == [1001]
+
+
+def test_a_pod_that_deleted_itself(world):
+    claim = world.ready()
+    world.tick(60)
+    world.finish(claim)
+    world.idle(600)
+    pod = world.pod
+    world.rp.pods.clear()  # the pod deleted itself, RunPod no longer lists it
+    world.tick(30)
+    assert world.pod is None
+    closed = world.svc.db.get_pod(pod.id)
+    assert closed.reason == "vanished" and world.rp.deleted == []
     assert world.tunnel.stopped == [1001]
-    assert stopped.cost_usd == pytest.approx(0.39 * (60 + 600) / 3600)
+    assert world.svc.db.get_worker_token(pod.token_id).revoked_at is not None
+    assert world.compute.status()["pod"] is None
+
+    world.queue()
+    world.tick()
+    assert world.pod.phase == "tunnel" and world.pod.id != pod.id and world.pod.tunnel["pid"] == 1002
+    world.tick()
+    assert world.pod.phase == "starting" and world.pod.runpod_id == "rp2"
 
 
 def test_switch_to_modal_stops_the_pod_once_its_job_finishes(world):

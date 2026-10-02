@@ -4,7 +4,9 @@
 
 Env: RADAR_DESK_URL and RADAR_WORKER_TOKEN (both required), RADAR_WORKER_ID (default the host
 name plus 4 hex), RADAR_DEVICE (auto), RADAR_WEIGHTS_RESOLVED else RADAR_WEIGHTS_DIR (default
-/workspace/radar-weights), RADAR_VENDOR_DIR, RADAR_IMAGE (reported as versions.image_id).
+/workspace/radar-weights), RADAR_VENDOR_DIR, RADAR_IMAGE (reported as versions.image_id). On a
+RunPod pod also RUNPOD_POD_ID and RUNPOD_API_KEY (both set by RunPod), RADAR_POD_IDLE_DELETE_S
+(default 600) and RADAR_POD_APP_LOST_DELETE_S (default 600).
 
 Every request carries the worker token, `ngrok-skip-browser-warning: 1` and a User-Agent. An
 empty claim backs off 1, 2, 4 .. seconds up to --poll. Only the app's own answers count: a
@@ -19,6 +21,15 @@ download in progress is cut short), and exits 0; a second signal releases the jo
 once. Exit 0 after --once or --idle-exit, 2 on a config error (missing env, token refused at
 start), 1 otherwise.
 
+On a RunPod pod (RUNPOD_POD_ID set) the worker deletes its own pod through RunPod's API, because
+RunPod restarts a container whose process ends. It does so when RADAR_POD_IDLE_DELETE_S pass
+without a job (the claim at that moment is the last chance: a job it returns is run, and a claim the
+app did not answer only counts toward the next rule) or when
+RADAR_POD_APP_LOST_DELETE_S pass without an answer from the app itself, also while waiting for
+the desk at start. It never deletes while a job is in hand. After a successful delete the worker
+exits 0. A delete that fails is logged once and the worker carries on without self-delete; the
+app's hour cap or Stop then ends the pod. --idle-exit is checked before either rule.
+
 Standard library and radar_worker only at module level; torch and the model are imported by
 `RealScorer` when it loads.
 """
@@ -26,6 +37,7 @@ Standard library and radar_worker only at module level; torch and the model are 
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import platform
@@ -38,6 +50,7 @@ import threading
 import time
 import traceback
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -50,6 +63,7 @@ DEFAULT_VENDOR_DIR = PACKAGE_PARENT / "vendor" / "damo-radar" / "RADAR_inference
 MANIFEST = PACKAGE_PARENT / "weights.json"
 DEFAULT_WEIGHTS_DIR = "/workspace/radar-weights"
 USER_AGENT = "radar-worker"
+RUNPOD_API_URL = "https://api.runpod.io/v2"
 
 
 def log(msg: str) -> None:
@@ -98,6 +112,11 @@ class DeskClient:
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.timeout = timeout
+        self.contacted = None  # called whenever the app itself answered
+
+    def _answered(self) -> None:
+        if self.contacted is not None:
+            self.contacted()
 
     def headers(self) -> dict:
         return {"Authorization": f"Bearer {self.token}", "ngrok-skip-browser-warning": "1",
@@ -118,14 +137,19 @@ class DeskClient:
             with urllib.request.urlopen(req, timeout=timeout or self.timeout) as resp:
                 raw = resp.read()
                 if resp.status == 204 or not raw:
+                    self._answered()
                     return None
-                return json.loads(raw)
+                parsed = json.loads(raw)
+                self._answered()
+                return parsed
         except urllib.error.HTTPError as err:
             try:
                 raw = err.read()
             except OSError:
                 raw = b""
             if _app_json(raw):
+                if err.code < 500:
+                    self._answered()
                 raise DeskError(err.code, str(json.loads(raw)["detail"])) from None
             raise DeskError(err.code, raw[:300].decode("utf-8", "replace"), from_app=False) from None
         except (urllib.error.URLError, OSError, ValueError) as err:
@@ -155,6 +179,64 @@ class DeskClient:
 
     def release(self, job_id: str, lease: str, timeout: float | None = None) -> dict:
         return self._call("POST", f"/worker/jobs/{job_id}/release", {"lease": lease}, timeout=timeout)
+
+
+# ---------------------------------------------------------------- the pod
+
+
+def _urllib_request(method: str, url: str, headers: dict) -> tuple[int, str]:
+    """(status, body text) for one request over urllib; a transport error is raised."""
+    req = urllib.request.Request(url, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return resp.status, resp.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as err:
+        try:
+            body = err.read().decode("utf-8", "replace")
+        except OSError:
+            body = ""
+        return err.code, body
+
+
+class PodSelfDelete:
+    """Deletes this pod through RunPod's v2 API. Built only when RUNPOD_POD_ID is set.
+
+    `request(method, url, headers)` returns (status, body text); the default goes over urllib.
+    The API key goes in the Authorization header only and is never logged.
+    """
+
+    def __init__(self, pod_id: str, api_key: str, idle_s: float = 600.0, app_lost_s: float = 600.0,
+                 request=None, sleep=time.sleep):
+        self.pod_id = pod_id
+        self._api_key = api_key
+        self.idle_s = float(idle_s)
+        self.app_lost_s = float(app_lost_s)
+        self.request = request or _urllib_request
+        self.sleep = sleep
+
+    def delete(self, reason: str) -> bool:
+        """True when RunPod deleted the pod (or no longer knows it); a transient failure is tried 3 times."""
+        log(f"deleting pod {self.pod_id}: {reason}")
+        url = f"{RUNPOD_API_URL}/pods/{urllib.parse.quote(self.pod_id, safe='')}"
+        headers = {"Authorization": f"Bearer {self._api_key}", "User-Agent": USER_AGENT}
+        status, body = 0, ""
+        for attempt in range(3):
+            if attempt:
+                self.sleep(5)
+            try:
+                status, body = self.request("DELETE", url, headers)
+            except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as err:
+                status, body = 0, str(getattr(err, "reason", err))
+                continue
+            if 200 <= status < 300 or status == 404:
+                log(f"pod {self.pod_id} deleted")
+                return True
+            if status != 429 and status < 500:
+                break
+        log(f"deleting pod {self.pod_id} failed (HTTP {status}: {body[:200]}); if this is a 401 or 403 the "
+            "pod-scoped RUNPOD_API_KEY may not be allowed to delete pods; the app's hour cap or Stop now "
+            "ends this pod")
+        return False
 
 
 # ---------------------------------------------------------------- the loop
@@ -189,6 +271,7 @@ class _Running:
 class Worker:
     """Claims and runs jobs until stopped, `once` is satisfied or `idle_exit` seconds pass without a job.
 
+    With `self_delete` it also deletes its pod when idle or cut off from the app for too long.
     `worker_info` is the dict sent with each claim, or a callable that returns it. `sleep` waits
     between empty claims and download retries; the default wakes early when a stop is requested.
     Retries of complete, fail and release wait with `sleep` when given, else `time.sleep`, so a
@@ -196,7 +279,8 @@ class Worker:
     """
 
     def __init__(self, client: DeskClient, scorer, worker_info, *, poll_s: float = 10.0, once: bool = False,
-                 idle_exit: float | None = None, clock=time.monotonic, sleep=None):
+                 idle_exit: float | None = None, clock=time.monotonic, sleep=None,
+                 self_delete: PodSelfDelete | None = None):
         self.client = client
         self.scorer = scorer
         self.worker_info = worker_info
@@ -209,6 +293,9 @@ class Worker:
         self._settle_sleep = sleep or time.sleep
         self.current: _Running | None = None
         self.load_failed = False
+        self.self_delete = self_delete
+        self.last_contact = clock()
+        client.contacted = self._contacted
 
     @property
     def stopping(self) -> bool:
@@ -231,9 +318,38 @@ class Worker:
     def _info(self) -> dict:
         return self.worker_info() if callable(self.worker_info) else self.worker_info
 
-    def _backoff(self, delay: float) -> float:
-        self.sleep(delay)
+    def _contacted(self) -> None:
+        self.last_contact = self.clock()
+
+    def _backoff(self, delay: float, idle_since: float | None = None, between_claims: bool = False) -> float:
+        """Sleep `delay`, cut short at the next self-delete deadline when waiting between claims."""
+        wait = delay
+        if between_claims and self.self_delete is not None and self.current is None:
+            due = self.last_contact + self.self_delete.app_lost_s
+            if idle_since is not None:
+                due = min(due, idle_since + self.self_delete.idle_s)
+            wait = min(delay, max(due - self.clock(), 0.0))
+        self.sleep(wait)
         return min(delay * 2, self.poll_s)
+
+    def _delete_pod_if_due(self, idle_since: float | None) -> bool:
+        """Delete the pod when no job is in hand and a deadline has passed; True once it is deleted.
+
+        A failed delete turns self-delete off for the rest of the process.
+        """
+        if self.self_delete is None or self.current is not None:
+            return False
+        now = self.clock()
+        if now - self.last_contact >= self.self_delete.app_lost_s:
+            reason = f"no answer from the app for {int(now - self.last_contact)} s"
+        elif idle_since is not None and now - idle_since >= self.self_delete.idle_s:
+            reason = f"idle for {int(now - idle_since)} s with no job"
+        else:
+            return False
+        if self.self_delete.delete(reason):
+            return True
+        self.self_delete = None
+        return False
 
     def wait_for_desk(self) -> int | None:
         """Check the token with /worker/me, retrying while the app is unreachable.
@@ -246,8 +362,10 @@ class Worker:
                 me = self.client.me()
             except DeskError as err:
                 if err.transient:
+                    if self._delete_pod_if_due(None):
+                        return 0
                     log(f"desk not reachable ({err}); retrying in {delay:g} s")
-                    delay = self._backoff(delay)
+                    delay = self._backoff(delay, between_claims=True)
                     continue
                 log(f"the desk refused this worker ({err}); check RADAR_DESK_URL and RADAR_WORKER_TOKEN")
                 return 2
@@ -259,8 +377,10 @@ class Worker:
         delay = min(1.0, self.poll_s)
         idle_since = self.clock()
         while not self.stopping:
+            answered = False
             try:
                 claim = self.client.claim(self._info())
+                answered = True
             except DeskError as err:
                 if not err.transient and err.status == 401:
                     log("the desk refused the worker token; stopping")
@@ -274,7 +394,9 @@ class Worker:
                 if self.idle_exit is not None and self.clock() - idle_since >= self.idle_exit:
                     log(f"idle for {self.idle_exit:g} s; exiting")
                     return 0
-                delay = self._backoff(delay)
+                if self._delete_pod_if_due(idle_since if answered else None):
+                    return 0
+                delay = self._backoff(delay, idle_since, between_claims=True)
                 continue
             self._run_one(claim)
             if self.load_failed:
@@ -553,10 +675,29 @@ def main(argv=None) -> int:
                    or DEFAULT_WEIGHTS_DIR)
     scorer = RealScorer(weights_dir, os.environ.get("RADAR_DEVICE", "auto").strip() or "auto", MANIFEST,
                         os.environ.get("RADAR_VENDOR_DIR") or DEFAULT_VENDOR_DIR)
+    self_delete = None
+    pod_id = os.environ.get("RUNPOD_POD_ID", "").strip()
+    if pod_id:
+        api_key = os.environ.get("RUNPOD_API_KEY", "").strip()
+        try:
+            idle_s = float(os.environ.get("RADAR_POD_IDLE_DELETE_S", "").strip() or 600)
+            app_lost_s = float(os.environ.get("RADAR_POD_APP_LOST_DELETE_S", "").strip() or 600)
+            deadlines_ok = idle_s > 0 and app_lost_s > 0
+        except ValueError:
+            deadlines_ok = False
+        if not deadlines_ok:
+            log("RADAR_POD_IDLE_DELETE_S and RADAR_POD_APP_LOST_DELETE_S must be numbers of seconds above 0; "
+                "the pod cannot delete itself")
+        elif api_key:
+            self_delete = PodSelfDelete(pod_id, api_key, idle_s, app_lost_s)
     worker_id = default_worker_id()
     worker = Worker(DeskClient(base_url, token), scorer, lambda: worker_info(scorer, worker_id),
-                    poll_s=args.poll, once=args.once, idle_exit=args.idle_exit)
+                    poll_s=args.poll, once=args.once, idle_exit=args.idle_exit, self_delete=self_delete)
     log(f"worker {worker_id}, weights in {weights_dir}, device {scorer.device}")
+    if self_delete is not None:
+        log(f"pod {pod_id} deletes itself after {idle_s:g} s without a job or {app_lost_s:g} s without the app")
+    elif pod_id and deadlines_ok:
+        log("RUNPOD_POD_ID is set but RUNPOD_API_KEY is empty; the pod cannot delete itself")
     previous = install_signals(worker) if threading.current_thread() is threading.main_thread() else {}
     try:
         code = worker.wait_for_desk()

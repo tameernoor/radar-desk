@@ -76,9 +76,10 @@ class Settings(BaseSettings):
     runpod_registry_auth_id: str | None = None
     runpod_datacenter: str = "EU-RO-1"
     runpod_gpus: str = DEFAULT_GPUS  # RunPod gpuTypeIds in order; compute/runpod.py owns the check
-    runpod_idle_min: float = 10
     runpod_max_pod_hours: float = 3
     runpod_start_timeout_s: float = 600
+    radar_pod_idle_delete_s: float = Field(default=600, ge=1)  # passed to the pod, which deletes itself
+    radar_pod_app_lost_delete_s: float = Field(default=600, ge=1)  # passed to the pod, likewise
 
     llm_api_key: SecretStr | None = None
     llm_provider: Literal["openrouter", "ollama", "openai"] | None = None  # None means inferred from the URL
