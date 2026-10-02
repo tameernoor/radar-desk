@@ -21,7 +21,7 @@ A score is how close an organ looks to a finding's text, not a calibrated probab
 
 ## How it works
 
-A FastAPI server takes the upload, and the scan goes to a shared S3-compatible bucket (or a volume). A Modal function on an L4 GPU runs DAMO's own PyTorch code and checkpoint, unedited, and writes the scores and the organ mask back to the same storage. The viewer (NiiVue) reads them through the API. The chat panel is persona, backed by any OpenAI-compatible model. `LLM_PROVIDER` picks OpenRouter (the default), a local Ollama or another endpoint.
+A FastAPI server takes the upload, and the scan goes to a shared S3-compatible bucket (or a volume). A GPU runs DAMO's own PyTorch code and checkpoint, unedited, and writes the scores and the organ mask back to the same storage. The GPU is one of three, chosen on the jobs page: a Modal function, a RunPod pod running the pull worker, or a RunPod serverless endpoint. The viewer (NiiVue) reads them through the API. The chat panel is persona, backed by any OpenAI-compatible model. `LLM_PROVIDER` picks OpenRouter (the default), a local Ollama or another endpoint.
 
 ## Results
 
@@ -31,7 +31,9 @@ A FastAPI server takes the upload, and the scan goes to a shared S3-compatible b
 | DAMO's published demo scores | max difference 0.0064, all in the oesophagus |
 | A Merlin scan against the browser port (radar-web) | same positives, 84.8 / 62.1 / 60.0% |
 | Time on an L4 | 16 to 28 s per scan, about 15 s model load when cold |
-| Cost | about 3 cents per scan, including the idle minutes |
+| Cost on Modal | about 3 cents per scan, including the idle minutes |
+| RunPod pod, RTX 4090 | about 2.5 min from Score to a ready pod, 2.4 s scoring |
+| RunPod serverless, L4 | 20 s per scan, about 2.5 cents |
 
 ## Run it
 
@@ -56,6 +58,8 @@ The Compute choice at the top of the jobs page moves scoring between Modal, a Ru
 The pod reaches the app through `WORKER_PUBLIC_URL`, which the app only checks, or, when that is unset, through a Cloudflare quick tunnel the app starts and stops itself. `uv run python -m radar_desk.compute runpod [--start]|modal|serverless|stop|status` does the same from a terminal.
 
 RunPod serverless submits each job to an endpoint that scales to zero, with no tunnel and no pod to manage; the scans and artefacts sit on the RunPod network volume (`STORAGE_BACKEND=runpod_volume`) or in the S3 bucket. Pin `WORKER_IMAGE` to a `worker-vX.Y` tag, create the endpoint once with `uv run python scripts/runpod_endpoint.py create`, put the printed `RUNPOD_ENDPOINT_ID` in `.env`, and pick `RunPod serverless` on the jobs page.
+
+To roll out a worker change, merge it (CI builds the image), tag the commit `worker-vX.Y` and push the tag (CI publishes `:X.Y`), and set `WORKER_IMAGE` to that tag. Then restart the app for pods, run `scripts/runpod_endpoint.py update` for serverless, and run `modal deploy worker/modal_app.py` for Modal. Never pin `:latest`.
 
 Tests are `uv run pytest` and, in `web/`, `npm test`.
 
