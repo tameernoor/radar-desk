@@ -101,12 +101,12 @@ class Poller:
             self.db.transition(job, "failed", finished_at=iso_at(now),
                                error=JobError(klass="input_error", message="the scan is gone or not ready"))
             return False
-        if not self.services.costs.budget_allows_now(now):
+        if not self.services.costs.budget_allows_now(now, backend.name):
             self._hold(job, "budget")
             return False
         keys = artefact_keys(job.id)
         storage = self.services.storage
-        # Presigned URLs for the URL adapters, volume:// paths for the Modal Volume.
+        # Presigned URLs for the URL adapters, volume:// paths for the Modal Volume and the RunPod volume.
         source_url = storage.worker_ref(source_key(scan.id), "GET", URL_TTL_S)
         put_urls = {name: storage.worker_ref(key, "PUT", URL_TTL_S) for name, key in keys.items()}
         # A spawn that raises after Modal accepted the call (a response timeout, say) is held as
@@ -122,7 +122,7 @@ class Poller:
                 job, "submitted",
                 modal_call_id=call_id,
                 backend=backend.name,
-                gpu_requested=self.settings.gpu_list,
+                gpu_requested=getattr(backend, "gpu_requested", None) or self.settings.gpu_list,
                 submitted_at=iso_at(now),
                 hold_reason=None,
                 error=None,

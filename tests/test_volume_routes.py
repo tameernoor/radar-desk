@@ -1,14 +1,17 @@
-"""The upload, viewer and mask flow with STORAGE_BACKEND=modal_volume, against the FakeVolume."""
+"""The upload, viewer and mask flow through /_volume, with STORAGE_BACKEND=modal_volume against the
+FakeVolume and with STORAGE_BACKEND=runpod_volume against an in-memory S3 client."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
+from botocore.exceptions import ClientError
 
 from fake_volume import FakeVolume
 from radar_desk.services.scans import source_key
 from radar_desk.storage.modal_volume import ModalVolumeStorage
+from radar_desk.storage.runpod_volume import RunPodVolumeStorage
 from test_api import api, make_api  # noqa: F401  (fixtures)
 
 
@@ -144,3 +147,60 @@ def test_volume_route_only_on_volume_storage(api):  # noqa: F811
 
 def test_signed_local_route_not_on_volume_storage(vapi):
     assert vapi.client.get("/_storage/scans/x/source.nii.gz").status_code == 404
+
+
+# The same routes on the RunPod volume, whose S3 API the adapter reaches through boto3
+
+
+class FakeS3:
+    """The four calls S3Storage makes, on a dict. A missing key raises ClientError 404 as botocore does."""
+
+    def __init__(self) -> None:
+        self.files: dict[str, bytes] = {}
+
+    def _get(self, op: str, Key: str) -> bytes:
+        if Key not in self.files:
+            raise ClientError({"Error": {"Code": "404", "Message": "Not Found"}}, op)
+        return self.files[Key]
+
+    def head_object(self, Bucket: str, Key: str) -> dict:
+        return {"ContentLength": len(self._get("HeadObject", Key))}
+
+    def get_object(self, Bucket: str, Key: str) -> dict:
+        data = self._get("GetObject", Key)
+
+        class Body:
+            def iter_chunks(self, size: int):
+                return (data[i:i + size] for i in range(0, len(data), size))
+
+        return {"Body": Body(), "ContentLength": len(data)}
+
+    def put_object(self, Bucket: str, Key: str, Body, ContentType: str | None = None) -> dict:
+        self.files[Key] = Body if isinstance(Body, bytes) else Body.read()
+        return {}
+
+    def delete_object(self, Bucket: str, Key: str) -> dict:
+        self._get("DeleteObject", Key)  # undocumented on RunPod; the adapter must tolerate it
+        del self.files[Key]
+        return {}
+
+
+@pytest.fixture
+def rpapi(make_api):  # noqa: F811
+    s3 = FakeS3()
+    storage = RunPodVolumeStorage("8yk0y6v12n", "EU-RO-1", "user_x", "rps_x", 300 * 1024 * 1024, client=s3)
+    rpapi = make_api(storage_backend="runpod_volume", storage=storage)
+    rpapi.volume = s3  # the Modal tests read .volume.files; the fake keeps the same shape
+    return rpapi
+
+
+def test_runpod_volume_upload_view_and_mask_end_to_end(rpapi):
+    test_upload_view_and_mask_end_to_end(rpapi)
+
+
+def test_runpod_volume_second_put_is_409(rpapi):
+    test_second_put_is_409(rpapi)
+
+
+def test_signed_local_route_not_on_runpod_volume_storage(rpapi):
+    assert rpapi.client.get("/_storage/scans/x/source.nii.gz").status_code == 404

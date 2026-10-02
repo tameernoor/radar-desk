@@ -26,6 +26,8 @@ class FakeApp:
         self.calls: list[tuple[str, str, dict | None]] = []
         self.refuse: str | None = None
         self.workers = [{"id": "runpod-abc123", "online": True, "job_id": "job_1"}]
+        self.serverless: dict = {"configured": False, "endpoint_id": None, "gpus": ["AMPERE_24", "ADA_24"],
+                                 "idle_s": 60, "price_per_s": 0.00031, "health": None, "job": None}
 
     def body(self) -> dict:
         return {"mode": self.mode, "changeable": True, "changed_at": None, "tunnel_mode": "managed",
@@ -33,6 +35,7 @@ class FakeApp:
                 "runpod": {"configured": True, "datacenter": "EU-RO-1", "max_pod_hours": 3,
                            "gpus": ["NVIDIA L4", "NVIDIA GeForce RTX 4090"], "idle_delete_s": 600,
                            "app_lost_delete_s": 600},
+                "serverless": self.serverless,
                 "pod": self.pod, "in_flight": None, "queued": 0, "held": [], "problem": self.problem,
                 "last_event": None, "spend_month_usd": 1.234, "budget_usd": 10.0, "month": "2026-10"}
 
@@ -129,6 +132,7 @@ def test_status_prints_health_compute_and_workers(world, capsys):
         "compute: mode worker, tunnel managed",
         "gpus: NVIDIA L4, NVIDIA GeForce RTX 4090 in EU-RO-1",
         "pod: rp123, ready, NVIDIA L4, $0.390/h, image ghcr.io/x/radar-worker:0.1, up 12 min",
+        "serverless: not configured",
         "problem: RunPod did not answer",
         "spend: $1.23 of $10.00 in 2026-10",
         "worker: runpod-abc123, online, job job_1",
@@ -152,7 +156,7 @@ def test_the_app_down_exits_1(world, capsys):
         raise httpx.ConnectError("refused", request=request)
 
     deps.app_client = httpx.Client(transport=httpx.MockTransport(down))
-    for argv in (["status"], ["runpod"], ["modal"], ["stop"]):
+    for argv in (["status"], ["runpod"], ["modal"], ["serverless"], ["stop"]):
         code, _, err = run(capsys, *argv, "--app", "http://127.0.0.1:9")
         assert code == 1
         assert "does not answer at http://127.0.0.1:9" in err
@@ -177,3 +181,32 @@ def test_an_older_body_without_gpus_prints_no_gpus_line():
     assert not any(line.startswith("gpus:") for line in compute_lines(body))
     body["runpod"] = {"gpus": ["NVIDIA L4"]}
     assert "gpus: NVIDIA L4" in compute_lines(body)
+
+
+def test_serverless_sets_the_mode(world, capsys):
+    app, run, _ = world
+    app.serverless = {**app.serverless, "configured": True, "endpoint_id": "ep123"}
+    code, out, _ = run(capsys, "serverless")
+    assert code == 0
+    assert app.calls == [("PUT", "/compute", {"mode": "serverless"})]
+    assert "compute: mode serverless" in out
+    assert "serverless: endpoint ep123, AMPERE_24, ADA_24, no job" in out
+
+
+def test_the_serverless_line_in_its_three_forms():
+    body = {"mode": "serverless", "changeable": True, "tunnel_mode": "managed", "pod": None,
+            "spend_month_usd": 0.0, "budget_usd": 10.0, "month": "2026-10",
+            "serverless": {"configured": False, "gpus": ["AMPERE_24"], "job": None}}
+    assert "serverless: not configured" in compute_lines(body)
+    body["serverless"] = {"configured": True, "endpoint_id": "ep123", "gpus": ["AMPERE_24", "ADA_24"], "job": None}
+    assert "serverless: endpoint ep123, AMPERE_24, ADA_24, no job" in compute_lines(body)
+    job = {"job_id": "job_ab12cd34ef56", "status": None, "submitted_at": "2026-10-15T12:00:00.000000Z",
+           "status_at": None}
+    body["serverless"]["job"] = job
+    assert ("serverless: endpoint ep123, AMPERE_24, ADA_24, job job_ab12 status pending "
+            "since 2026-10-15T12:00:00.000000Z") in compute_lines(body)
+    job["status"] = "IN_QUEUE"
+    assert ("serverless: endpoint ep123, AMPERE_24, ADA_24, job job_ab12 IN_QUEUE "
+            "since 2026-10-15T12:00:00.000000Z") in compute_lines(body)
+    del body["serverless"]
+    assert not any(line.startswith("serverless:") for line in compute_lines(body))

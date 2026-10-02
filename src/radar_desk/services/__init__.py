@@ -60,7 +60,7 @@ class Services:
         now = time.time() if now is None else now
         body = self.costs.gpu_status(self.backend.name, now, self.compute.mode, self.compute.pod_view(now))
         return {**body, "runpod_configured": self.compute.configured(),
-                "problem": self.db.get_setting("problem")}
+                "serverless": self.compute.serverless_view(), "problem": self.compute.problem(now)}
 
 
 def make_backend(settings: Any, db: Database, storage: Storage, name: str | None = None) -> Any:
@@ -75,6 +75,10 @@ def make_backend(settings: Any, db: Database, storage: Storage, name: str | None
         from radar_desk.gpu.worker_backend import WorkerGpuBackend
 
         return WorkerGpuBackend(db, storage)
+    if name == "serverless":
+        from radar_desk.gpu.serverless_backend import ServerlessGpuBackend
+
+        return ServerlessGpuBackend(settings, storage, db)
     from radar_desk.gpu.fake import FakeGpuBackend, synthesize_result
 
     def synthesize(job_id: str) -> dict:
@@ -96,8 +100,8 @@ def build_services(
     fixtures_root: Path = DEFAULT_ROOT,
     clock: Callable[[], float] = time.time,
 ) -> Services:
-    """Wire the services. A backend given here, or GPU_BACKEND=fake, is fixed; modal and worker give a
-    choice the owner can change, each backend built on first use."""
+    """Wire the services. A backend given here, or GPU_BACKEND=fake, is fixed; modal, worker and serverless
+    give a choice the owner can change, each backend built on first use."""
     db = db or Database(settings.db_path)
     storage = storage or make_storage(settings)
     if backend is None and settings.gpu_backend == "fake":
@@ -106,7 +110,7 @@ def build_services(
         backends = {getattr(backend, "name", None) or "fake": lambda: backend}
     else:
         backends = {name: (lambda name=name: make_backend(settings, db, storage, name))
-                    for name in ("modal", "worker")}
+                    for name in ("modal", "worker", "serverless")}
     if runpod is None and settings.runpod_configured:
         from radar_desk.compute.runpod import RunPod
 

@@ -10,15 +10,30 @@ import pytest
 from radar_desk.compute.runpod import RunPod
 from radar_desk.compute.tunnel import Tunnel, TunnelError
 from radar_desk.config import Settings
+from radar_desk.gpu.backend import artefact_keys
 from radar_desk.gpu.fake import FakeGpuBackend, canned_result
 from radar_desk.gpu.poller import Poller
+from radar_desk.gpu.serverless_backend import ServerlessGpuBackend
+from radar_desk.records import Job
 from radar_desk.services import build_services
-from radar_desk.services.compute import FIXED, MODAL_NEEDS_STORAGE, POD_FAILED, TUNNEL_DIED, UNREACHABLE
+from radar_desk.services.compute import (
+    FIXED,
+    HEALTH_DOWN,
+    MODAL_NEEDS_STORAGE,
+    MODAL_ON_RUNPOD_VOLUME,
+    POD_FAILED,
+    QUEUE_WARNING,
+    SERVERLESS_NEEDS_CONFIG,
+    SERVERLESS_NEEDS_STORAGE,
+    TUNNEL_DIED,
+    UNREACHABLE,
+)
 from radar_desk.services.costs import parse_iso
 from radar_desk.services.errors import ServiceError
 from radar_desk.services.scans import source_key
 from radar_desk.storage import make_storage
 from synth import make_nifti
+from test_serverless_backend import CALL, ENDPOINT, FakeEndpoint, completed
 
 OWNER = "test-owner"
 IMAGE = "ghcr.io/example/radar-worker:test"
@@ -195,6 +210,14 @@ class World:
 
     def job(self, job_id: str):
         return self.svc.db.get_job(job_id)
+
+    def serverless(self) -> FakeEndpoint:
+        """Serve the serverless backend from a fake endpoint; the settings need RUNPOD_ENDPOINT_ID=ENDPOINT."""
+        endpoint = FakeEndpoint()
+        client = httpx.Client(transport=httpx.MockTransport(endpoint))
+        self.compute.backends["serverless"] = lambda: ServerlessGpuBackend(
+            self.compute.settings, self.svc.storage, self.svc.db, client=client, clock=self.clock)
+        return endpoint
 
     def last(self):
         return self.svc.db.list_pods()[0]
@@ -781,3 +804,226 @@ def test_a_deploy_answer_without_a_price_takes_the_listed_one(world):
     assert world.pod.cost_per_hr == 0
     world.tick(30)
     assert world.pod.cost_per_hr == 0.39
+
+
+# RunPod serverless
+
+SLS = 0.00031
+WORST_SLS = (2 * 1800 + 60) * SLS
+
+
+def serverless_world(tmp_path, **overrides) -> tuple[World, FakeEndpoint, Poller]:
+    w = World(tmp_path, runpod_endpoint_id=ENDPOINT, **overrides)
+    endpoint = w.serverless()
+    w.compute.set_mode("serverless")
+    return w, endpoint, Poller(w.svc, clock=w.clock)
+
+
+def test_serverless_is_seeded_from_gpu_backend(tmp_path):
+    w = World(tmp_path, gpu_backend="serverless", runpod_endpoint_id=ENDPOINT)
+    assert w.compute.mode == "serverless" and w.svc.db.get_setting("mode") == "serverless"
+
+
+def test_set_mode_serverless_refusals(tmp_path):
+    cases = [({}, SERVERLESS_NEEDS_CONFIG),
+             ({"runpod_endpoint_id": ENDPOINT, "storage_backend": None, "s3_bucket": None}, SERVERLESS_NEEDS_STORAGE),
+             ({"runpod_endpoint_id": ENDPOINT, "storage_backend": "modal_volume"}, SERVERLESS_NEEDS_STORAGE)]
+    for n, (overrides, detail) in enumerate(cases):
+        w = World(tmp_path / str(n), **overrides)
+        with pytest.raises(ServiceError) as info:
+            w.compute.set_mode("serverless")
+        assert info.value.status == 409 and info.value.detail == detail
+        assert w.compute.mode == "worker"
+    w = World(tmp_path / "volume", runpod_endpoint_id=ENDPOINT, storage_backend="runpod_volume")
+    with pytest.raises(ServiceError) as info:
+        w.compute.set_mode("modal")
+    assert info.value.status == 409 and info.value.detail == MODAL_ON_RUNPOD_VOLUME
+    assert w.compute.set_mode("serverless")["mode"] == "serverless"
+    with pytest.raises(ServiceError) as info:
+        w.compute.set_mode("cloud")
+    assert info.value.detail == "unknown mode 'cloud'; use modal, worker or serverless"
+
+
+def test_the_poller_spawns_and_settles_through_serverless(tmp_path):
+    w, endpoint, poller = serverless_world(tmp_path)
+    job_id = w.queue()
+    poller.tick()
+    job = w.job(job_id)
+    assert job.state == "submitted" and job.backend == "serverless" and job.modal_call_id == CALL
+    assert job.gpu_requested == ["AMPERE_24", "ADA_24"]
+    assert endpoint.paths() == [f"POST /v2/{ENDPOINT}/run"]
+    assert w.pod is None and w.rp.deployed == []
+
+    endpoint.status = completed(canned_result(job_id, gpu="NVIDIA L4"))
+    w.svc.storage.put_bytes(artefact_keys(job_id)["mask"], b"mask")
+    w.clock.advance(100)
+    poller.tick()
+    job = w.job(job_id)
+    assert job.state == "done" and job.cost_estimate_usd == pytest.approx((61 + 60) * SLS)
+
+
+def test_no_serverless_spawn_while_a_modal_job_is_submitted(tmp_path):
+    w = World(tmp_path, runpod_endpoint_id=ENDPOINT)
+    endpoint = w.serverless()
+    modal_stand_in(w).delay_ticks = 100
+    w.compute.set_mode("modal")
+    first = w.queue()
+    poller = Poller(w.svc, clock=w.clock)
+    poller.tick()
+    assert w.job(first).backend == "modal"
+    w.compute.set_mode("serverless")
+    second = w.queue()
+    poller.tick()
+    assert w.job(first).state == "submitted"
+    assert w.job(second).state == "queued" and endpoint.requests == []
+
+
+def test_a_serverless_job_finishes_after_a_switch_to_worker(tmp_path):
+    w, endpoint, poller = serverless_world(tmp_path)
+    job_id = w.queue()
+    poller.tick()
+    w.compute.set_mode("worker")
+    endpoint.status = completed(canned_result(job_id, gpu="NVIDIA L4"))
+    w.svc.storage.put_bytes(artefact_keys(job_id)["mask"], b"mask")
+    w.clock.advance(100)
+    poller.tick()
+    assert w.job(job_id).state == "done" and w.job(job_id).cost_estimate_usd > 0
+    assert w.pod is None  # nothing queued, so no pod
+
+
+def test_switch_to_serverless_stops_the_pod_once_its_job_finishes(tmp_path):
+    w = World(tmp_path, runpod_endpoint_id=ENDPOINT)
+    claim = w.ready()
+    w.compute.set_mode("serverless")
+    w.tick(5)
+    assert w.pod is not None
+    w.finish(claim)
+    w.tick(5)
+    assert w.pod is None and w.last().reason == "mode"
+
+
+def test_the_budget_holds_at_the_serverless_worst_case(tmp_path):
+    w, endpoint, poller = serverless_world(tmp_path, gpu_monthly_budget_usd=1.0)  # Modal's worst case fits
+    job_id = w.queue()
+    poller.tick()
+    assert w.job(job_id).hold_reason == "budget" and endpoint.requests == []
+    w.compute.settings.gpu_monthly_budget_usd = WORST_SLS + 0.01
+    poller.tick()
+    assert w.job(job_id).state == "submitted"
+    assert w.svc.costs.in_flight() == pytest.approx(WORST_SLS)
+
+
+def test_the_serverless_block_of_status(tmp_path):
+    w = World(tmp_path)
+    assert w.compute.status()["serverless"] == {
+        "configured": False, "endpoint_id": None, "gpus": ["AMPERE_24", "ADA_24"], "idle_s": 60,
+        "price_per_s": SLS, "health": None, "job": None}
+
+    w, _endpoint, poller = serverless_world(tmp_path / "sls")
+    block = w.compute.status()["serverless"]
+    assert block["configured"] is True and block["endpoint_id"] == ENDPOINT and block["job"] is None
+    assert "serverless" not in w.compute._built  # status never builds the backend
+    job_id = w.queue()
+    poller.tick()
+    assert w.compute.status()["serverless"]["job"] == {
+        "job_id": job_id, "status": None, "submitted_at": "2026-10-15T12:00:00.000000Z", "status_at": None}
+    w.clock.advance(10)
+    poller.tick()
+    body = w.compute.status()
+    block = body["serverless"]
+    assert block["job"]["status"] == "IN_QUEUE" and block["job"]["status_at"] == "2026-10-15T12:00:10.000000Z"
+    assert block["health"]["workers"] == {"idle": 0, "running": 0}
+    assert block["health"]["at"] == "2026-10-15T12:00:10.000000Z"
+    assert body["in_flight"] == {"job_id": job_id, "backend": "serverless"}
+
+
+def test_the_queue_warning(tmp_path):
+    w, endpoint, poller = serverless_world(tmp_path)
+    w.queue()
+    poller.tick()
+    w.clock.advance(300)
+    poller.tick()
+    assert w.compute.status()["problem"] is None
+    w.clock.advance(1)
+    poller.tick()
+    assert w.compute.status()["problem"] == QUEUE_WARNING.format(n=5, datacenter="EU-RO-1")
+    assert w.compute.status()["problem"].startswith("No worker has started in 5 min; EU-RO-1 stock")
+    endpoint.health = (200, {"workers": {"idle": 0, "running": 1}, "jobs": {}})
+    w.clock.advance(10)
+    poller.tick()
+    assert w.compute.status()["problem"] is None
+    endpoint.health = (200, {"workers": {"idle": 0, "running": 0}, "jobs": {}})
+    endpoint.status = (200, {"id": CALL, "status": "IN_PROGRESS"})
+    poller.tick()
+    assert w.compute.status()["problem"] is None
+
+
+def test_health_down_is_a_problem_after_a_minute(tmp_path):
+    w, endpoint, poller = serverless_world(tmp_path)
+    w.queue()
+    poller.tick()
+    endpoint.health = (503, None)
+    w.clock.advance(10)
+    poller.tick()
+    w.clock.advance(59)
+    poller.tick()
+    assert w.compute.status()["problem"] is None
+    w.clock.advance(1)
+    assert w.compute.status()["problem"] == HEALTH_DOWN
+    endpoint.health = (200, {"workers": {"idle": 1, "running": 0}, "jobs": {}})
+    poller.tick()
+    assert w.compute.status()["problem"] is None
+
+
+def test_health_down_clears_once_the_job_has_settled(tmp_path):
+    """Only a poll reads /health, so a failure on the last tick must not stay on GET /compute."""
+    w, endpoint, poller = serverless_world(tmp_path)
+    job_id = w.queue()
+    poller.tick()
+    endpoint.health = (503, None)
+    w.clock.advance(10)
+    poller.tick()
+    w.clock.advance(60)
+    assert w.compute.status()["problem"] == HEALTH_DOWN
+    endpoint.status = completed(canned_result(job_id, gpu="NVIDIA L4"))
+    w.svc.storage.put_bytes(artefact_keys(job_id)["mask"], b"mask")
+    poller.tick()
+    assert w.job(job_id).state != "submitted"
+    assert w.compute._built["serverless"].health_failed_since is not None
+    assert w.compute.status()["problem"] is None
+
+
+def test_gpu_status_prices_serverless_by_the_pool(tmp_path):
+    w, _endpoint, _poller = serverless_world(tmp_path)
+    body = w.svc.gpu_status()
+    assert body["backend"] == "serverless" and body["compute_mode"] == "serverless"
+    assert body["price_per_hour_usd"] == round(SLS * 3600, 4)
+
+
+def test_gpu_status_carries_the_serverless_block_and_problem(tmp_path):
+    w, _endpoint, poller = serverless_world(tmp_path)
+    w.queue()
+    poller.tick()
+    w.clock.advance(301)
+    poller.tick()
+    body = w.svc.gpu_status(w.clock())
+    assert body["serverless"] == w.compute.status()["serverless"] == w.compute.serverless_view()
+    assert body["serverless"]["job"]["status"] == "IN_QUEUE"
+    assert body["problem"] == w.compute.status()["problem"] == QUEUE_WARNING.format(n=5, datacenter="EU-RO-1")
+
+
+def test_serverless_attempt_cost(tmp_path):
+    w, endpoint, poller = serverless_world(tmp_path)
+    costs, now = w.svc.costs, w.clock()
+    job = Job(id="j", scan_id="s", backend="serverless", submitted_at="2026-10-15T11:50:00.000000Z")
+    assert costs.attempt_cost(job, {"total_s": 50.0, "runpod_execution_s": 61.0}, None, now) == pytest.approx(
+        (61 + 60) * SLS)
+    assert costs.attempt_cost(job, {"total_s": 70.0}, None, now) == pytest.approx((70 + 60) * SLS)
+    assert costs.attempt_cost(job, None, None, now) == pytest.approx((600 + 60) * SLS)
+
+    job_id = w.queue()
+    poller.tick()
+    w.clock.advance(100)
+    cancelled = w.svc.jobs.cancel(job_id)
+    assert endpoint.paths()[-1] == f"POST /v2/{ENDPOINT}/cancel/{CALL}"
+    assert cancelled.state == "cancelled" and cancelled.cost_estimate_usd == pytest.approx((100 + 60) * SLS)

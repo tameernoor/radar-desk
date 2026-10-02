@@ -171,6 +171,18 @@ def test_s3_stream_put_delete(s3):
     storage.delete(KEY)
 
 
+def test_s3_delete_missing_is_fine_other_errors_raise(s3):
+    storage, stub = s3
+    params = {"Bucket": "radar-bucket", "Key": KEY}
+    stub.add_client_error("delete_object", "404", "Not Found", 404, expected_params=params)
+    storage.delete(KEY)
+    stub.add_client_error("delete_object", "NoSuchKey", "Not Found", 404, expected_params=params)
+    storage.delete(KEY)
+    stub.add_client_error("delete_object", "403", "Forbidden", 403, expected_params=params)
+    with pytest.raises(StorageError):
+        storage.delete(KEY)
+
+
 def test_make_storage_picks_adapter(tmp_path: Path):
     base = {
         "s3_endpoint_url": "https://example.invalid",
@@ -371,3 +383,127 @@ def test_make_storage_picks_the_volume(tmp_path: Path):
     storage = make_storage(s)
     assert isinstance(storage, ModalVolumeStorage)
     assert storage.volume_name == "radar-data-x" and storage._volume is None
+
+
+# RunPod volume adapter: the S3 adapter on the volume's S3 API, with /_volume routes and volume:// refs
+
+
+RUNPOD_BUCKET = "8yk0y6v12n"
+
+
+def _runpod(**kw):
+    from radar_desk.storage.runpod_volume import RunPodVolumeStorage
+
+    args = {"volume_id": RUNPOD_BUCKET, "datacenter": "EU-RO-1", "access_key": "user_DUMMY",
+            "secret_key": "rps_dummy", "max_upload_bytes": 300 * 1024 * 1024}
+    return RunPodVolumeStorage(**{**args, **kw})
+
+
+def test_runpod_volume_builds_its_client_from_the_settings():
+    storage = _runpod()
+    meta = storage.client.meta
+    assert storage.name == "runpod_volume" and storage.bucket == RUNPOD_BUCKET
+    assert meta.endpoint_url == "https://s3api-eu-ro-1.runpod.io"
+    assert meta.region_name == "EU-RO-1"
+    assert meta.config.signature_version == "s3v4"
+    assert meta.config.s3["addressing_style"] == "path"
+
+
+def test_runpod_volume_urls_and_worker_refs():
+    storage = _runpod()
+    assert storage.put_url(KEY, 900) == f"/_volume/{KEY}"
+    assert storage.get_url(KEY, 3600) == f"/_volume/{KEY}"
+    assert storage.worker_ref(KEY, "GET", 60) == f"volume://{KEY}"
+    assert storage.worker_ref("jobs/j1/result.json", "PUT", 60) == "volume://jobs/j1/result.json"
+    with pytest.raises(ValueError):
+        storage.worker_ref(KEY, "DELETE", 60)
+    for call in (lambda: storage.put_url("a/../b", 60), lambda: storage.worker_ref("/abs", "GET", 60)):
+        with pytest.raises(StorageError):
+            call()
+
+
+def test_runpod_volume_upload_limit_must_fit_one_put_object():
+    from radar_desk.config import ConfigError
+    from radar_desk.storage.runpod_volume import PUT_OBJECT_CAP
+
+    assert PUT_OBJECT_CAP == 500 * 1024 * 1024
+    _runpod(max_upload_bytes=PUT_OBJECT_CAP - 1)
+    for n in (PUT_OBJECT_CAP, PUT_OBJECT_CAP + 1):
+        with pytest.raises(ConfigError, match=f"MAX_UPLOAD_BYTES must be under {PUT_OBJECT_CAP}.*it is {n}"):
+            _runpod(max_upload_bytes=n)
+
+
+@pytest.fixture
+def rp() -> tuple:
+    client = _s3_client()
+    storage = _runpod(client=client)
+    with Stubber(client) as stub:
+        yield storage, stub
+        stub.assert_no_pending_responses()
+
+
+def test_runpod_volume_inherits_head_get_put_delete(rp, tmp_path: Path):
+    from botocore.stub import ANY
+
+    storage, stub = rp
+    params = {"Bucket": RUNPOD_BUCKET, "Key": KEY}
+    stub.add_response("head_object", {"ContentLength": 42}, params)
+    assert storage.exists(KEY)
+    stub.add_client_error("head_object", "404", "Not Found", 404, expected_params=params)
+    assert not storage.exists(KEY)
+    stub.add_response("head_object", {"ContentLength": 42}, params)
+    assert storage.size(KEY) == 42
+    stub.add_client_error("head_object", "404", "Not Found", 404, expected_params=params)
+    with pytest.raises(ObjectMissing):
+        storage.size(KEY)
+    body = StreamingBody(io.BytesIO(b"abc" * 10), 30)
+    stub.add_response("get_object", {"Body": body, "ContentLength": 30}, params)
+    assert b"".join(storage.open_stream(KEY)) == b"abc" * 10
+    stub.add_response("put_object", {}, {**params, "Body": b"data", "ContentType": "application/json"})
+    storage.put_bytes(KEY, b"data", content_type="application/json")
+    src = tmp_path / "in.bin"
+    src.write_bytes(b"data")
+    stub.add_response("put_object", {}, {**params, "Body": ANY, "ContentType": "application/gzip"})
+    storage.put_file(KEY, src, content_type="application/gzip")
+    stub.add_response("delete_object", {}, params)
+    storage.delete(KEY)
+
+
+def _runpod_settings(tmp_path: Path, **kw) -> SimpleNamespace:
+    base = {"storage_backend": "runpod_volume", "runpod_volume_id": RUNPOD_BUCKET, "runpod_datacenter": "EU-RO-1",
+            "runpod_s3_access_key_id": SecretStr("user_DUMMY"), "runpod_s3_secret_access_key": SecretStr("rps_x"),
+            "max_upload_bytes": 300 * 1024 * 1024, "s3_bucket": "ignored", "data_dir": tmp_path,
+            "public_base_url": "http://localhost:8000", "session_secret": "s"}
+    return SimpleNamespace(**{**base, **kw})
+
+
+def test_make_storage_picks_the_runpod_volume(tmp_path: Path):
+    from radar_desk.storage import RunPodVolumeStorage
+
+    storage = make_storage(_runpod_settings(tmp_path))
+    assert isinstance(storage, RunPodVolumeStorage) and storage.bucket == RUNPOD_BUCKET
+    assert storage.client.meta.endpoint_url == "https://s3api-eu-ro-1.runpod.io"
+    creds = storage.client._request_signer._credentials
+    assert (creds.access_key, creds.secret_key) == ("user_DUMMY", "rps_x")  # unwrapped SecretStr
+
+
+@pytest.mark.parametrize("missing", ["runpod_volume_id", "runpod_s3_access_key_id", "runpod_s3_secret_access_key"])
+def test_make_storage_runpod_volume_names_the_missing_setting(tmp_path: Path, missing):
+    from radar_desk.config import ConfigError
+
+    with pytest.raises(ConfigError, match=f"STORAGE_BACKEND=runpod_volume needs {missing.upper()}$"):
+        make_storage(_runpod_settings(tmp_path, **{missing: None}))
+
+
+def test_make_storage_runpod_volume_refuses_a_large_upload_limit(tmp_path: Path):
+    from radar_desk.config import ConfigError
+
+    with pytest.raises(ConfigError, match="MAX_UPLOAD_BYTES"):
+        make_storage(_runpod_settings(tmp_path, max_upload_bytes=600 * 1024 * 1024))
+
+
+def test_browser_via_api_only_on_the_volume_adapters(local, mv, s3):
+    assert _runpod().browser_via_api is True
+    assert mv.browser_via_api is True
+    assert getattr(local, "browser_via_api", False) is False
+    assert getattr(s3[0], "browser_via_api", False) is False

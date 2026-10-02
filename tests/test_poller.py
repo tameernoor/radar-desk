@@ -193,6 +193,25 @@ def test_budget_counts_month_spend_and_in_flight(env, clock):
     assert svc.jobs.get(job.id).state == "submitted"
 
 
+class ServerlessStandIn(FakeGpuBackend):
+    name = "serverless"
+    gpu_requested = ("AMPERE_24", "ADA_24")
+
+
+def test_budget_uses_the_serverless_worst_case(env, clock):
+    worst_sls = (2 * 1800 + 60) * 0.00031  # above WORST_L4
+    svc, backend, poller, scan = env(backend=ServerlessStandIn(clock=clock),
+                                     gpu_monthly_budget_usd=(WORST_L4 + worst_sls) / 2)
+    job = svc.jobs.create(scan.id)
+    poller.tick()
+    assert svc.jobs.get(job.id).hold_reason == "budget" and backend.calls == {}
+    svc.settings.gpu_monthly_budget_usd = worst_sls
+    poller.tick()
+    job = svc.jobs.get(job.id)
+    assert job.state == "submitted" and job.backend == "serverless"
+    assert job.gpu_requested == ["AMPERE_24", "ADA_24"]
+
+
 def test_one_job_at_a_time(env):
     svc, backend, poller, scan = env()
     backend.delay_ticks = 1

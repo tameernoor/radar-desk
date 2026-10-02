@@ -1,8 +1,9 @@
-"""PUT and GET /_volume/{key}: the browser's way to a Modal Volume, through the API.
+"""PUT and GET /_volume/{key}: the browser's way to a volume, through the API.
 
-Mounted only when the storage is ModalVolumeStorage. The owner's cookie or bearer is the auth;
-the browser's upload and the viewer's fetch are same-origin, so the cookie goes along. A PUT is
-streamed to a temp file under DATA_DIR and then uploaded from disk, so a scan never sits in memory.
+Mounted for any adapter the browser reaches through the API (Modal Volume, RunPod volume), the ones
+with `browser_via_api = True`. The owner's cookie or bearer is the auth; the browser's upload and the
+viewer's fetch are same-origin, so the cookie goes along. A PUT is streamed to a temp file under
+DATA_DIR and then uploaded from disk, so a scan never sits in memory.
 """
 
 from __future__ import annotations
@@ -15,14 +16,14 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
 from radar_desk.routes import OWNER, TOO_LARGE, spool_request
-from radar_desk.storage import ModalVolumeStorage, ObjectExists, ObjectMissing, StorageError, validate_key
+from radar_desk.storage import ObjectExists, ObjectMissing, Storage, StorageError, validate_key
 
 router = APIRouter(prefix="/_volume", tags=["storage"], dependencies=OWNER, include_in_schema=False)
 
 TEMP_DIR = "volume-uploads"
 
 
-def _storage(request: Request, key: str) -> ModalVolumeStorage:
+def _storage(request: Request, key: str) -> Storage:
     try:
         validate_key(key)
     except StorageError as exc:

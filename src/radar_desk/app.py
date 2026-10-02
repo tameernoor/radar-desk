@@ -40,8 +40,8 @@ from radar_desk.routes import (
 )
 from radar_desk.routes.health import VERSION
 from radar_desk.services import ServiceError, Services, build_services
-from radar_desk.services.compute import MODAL_NEEDS_STORAGE
-from radar_desk.storage import LocalStorage, ModalVolumeStorage, storage_backend
+from radar_desk.services.compute import MODAL_ON_LOCAL, MODAL_ON_VOLUME, SERVERLESS_FALLBACK, mode_refusal
+from radar_desk.storage import LocalStorage, storage_backend
 
 log = logging.getLogger(__name__)
 
@@ -54,11 +54,18 @@ def create_app(settings: Any = None, services: Services | None = None, start_pol
     """Build the app. Services are built here when not given, so routes work with or without the lifespan;
     the lifespan only runs the poller."""
     settings = settings if settings is not None else (services.settings if services else load_settings())
-    if settings.gpu_backend == "modal" and storage_backend(settings) == "local":
-        raise ConfigError(MODAL_NEEDS_STORAGE)
+    if settings.gpu_backend in ("modal", "serverless"):
+        refusal = mode_refusal(settings, settings.gpu_backend)
+        if refusal:
+            raise ConfigError(refusal if settings.gpu_backend == "modal" else f"GPU_BACKEND=serverless: {refusal}")
     services = services if services is not None else build_services(settings)
-    if services.compute.changeable and services.compute.mode == "modal" and storage_backend(settings) == "local":
-        services.compute.fall_back_from_modal()  # refusing would leave the owner no way to switch back
+    mode = services.compute.mode if services.compute.changeable else None
+    if mode in ("modal", "serverless") and mode_refusal(settings, mode):
+        # Refusing would leave the owner no way to switch back.
+        if mode == "serverless":
+            services.compute.fall_back(SERVERLESS_FALLBACK)
+        else:
+            services.compute.fall_back(MODAL_ON_LOCAL if storage_backend(settings) == "local" else MODAL_ON_VOLUME)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -107,7 +114,7 @@ def create_app(settings: Any = None, services: Services | None = None, start_pol
         app.include_router(module.router)
     if isinstance(services.storage, LocalStorage):
         app.include_router(local_storage.router)
-    if isinstance(services.storage, ModalVolumeStorage):
+    if getattr(services.storage, "browser_via_api", False):
         app.include_router(volume_storage.router)
 
     if Path(web_dist).is_dir():

@@ -1,7 +1,8 @@
 """The compute choice and the RunPod pod the app starts for pull workers (plan.md, Compute switch B).
 
-The mode, `modal` or `worker`, lives in the database and is seeded once from GPU_BACKEND; the fake backend
-is fixed at start-up. In mode worker with RunPod configured, `tick` starts one pod when work is queued and
+The mode, `modal`, `worker` or `serverless`, lives in the database and is seeded once from GPU_BACKEND; the
+fake backend is fixed at start-up. Serverless needs no pod: the poller spawns and polls it like Modal, and
+`status` shows its endpoint, its last /health and the submitted job's RunPod status. In mode worker with RunPod configured, `tick` starts one pod when work is queued and
 moves its row through `tunnel`, `starting` and `ready`, and stops it at the hour cap, when the mode is no
 longer worker, or when something under it fails. An idle pod deletes itself (RADAR_POD_IDLE_DELETE_S, passed
 to the pod), and the next reconcile closes its row as vanished. A pod the app stops is deleted on RunPod before
@@ -22,16 +23,20 @@ import httpx
 from radar_desk.compute.runpod import PodSpec, RunPodError, StockError
 from radar_desk.compute.tunnel import TunnelError
 from radar_desk.records import Job, PodRecord
-from radar_desk.services.costs import iso_at, month_of, parse_iso, price_per_s, worst_case
+from radar_desk.services.costs import iso_at, job_backend, month_of, parse_iso, price_per_s, worst_case
 from radar_desk.services.errors import ServiceError
 from radar_desk.storage import storage_backend
 
 log = logging.getLogger(__name__)
 
-MODES = ("modal", "worker")
+MODES = ("modal", "worker", "serverless")
 POD_NAME = "radar-worker"
 MODAL_NEEDS_STORAGE = ("GPU_BACKEND=modal needs S3_BUCKET or STORAGE_BACKEND=modal_volume: "
                        "Modal cannot reach the local storage URLs")
+MODAL_ON_RUNPOD_VOLUME = ("GPU_BACKEND=modal cannot use STORAGE_BACKEND=runpod_volume: Modal cannot reach the "
+                          "RunPod volume, it has no presigned URLs")
+SERVERLESS_NEEDS_CONFIG = "serverless needs RUNPOD_API_KEY and RUNPOD_ENDPOINT_ID"
+SERVERLESS_NEEDS_STORAGE = "serverless needs STORAGE_BACKEND=runpod_volume or S3_BUCKET"
 FIXED = "The fake backend is chosen at start-up."
 START_HOLDS = ("no_gpu", "tunnel_unreachable", "pod_failed", "budget", "owner")
 RECONCILE_EVERY_S = 30
@@ -45,15 +50,28 @@ POD_FAILED = "Pod started twice without a worker reporting in; check the image a
 WORKER_LOST = "Worker went silent, pod stopped; a new one starts when work is queued"
 UNCONFIGURED = "RunPod is not fully configured, the pod is managed but no new one starts"
 MODAL_ON_LOCAL = "Compute mode was modal but Modal cannot reach local storage; set to worker"
+MODAL_ON_VOLUME = "Compute mode was modal but Modal cannot reach the RunPod volume; set to worker"
+SERVERLESS_FALLBACK = "Compute mode was serverless but it is not configured for this storage; set to worker"
+QUEUE_WARNING = ("No worker has started in {n} min; {datacenter} stock or a slow image pull. "
+                 "Cancel the job to switch.")
+HEALTH_DOWN = "RunPod /health has not answered for a minute"
+HEALTH_DOWN_S = 60
 RUNPOD_ERRORS = (RunPodError, httpx.HTTPError)
 ALL = 100_000
 
 
-def job_backend(job: Job) -> str:
-    """The backend a job ran on. An older row without one is read from its call id."""
-    if job.backend:
-        return job.backend
-    return "worker" if (job.modal_call_id or "").startswith("wk_") else "modal"
+def mode_refusal(settings: Any, mode: str) -> str | None:
+    """Why `mode` cannot run on these settings, or None. Shared by set_mode and the start-up checks."""
+    storage = storage_backend(settings)
+    if mode == "modal" and storage == "local":
+        return MODAL_NEEDS_STORAGE
+    if mode == "modal" and storage == "runpod_volume":
+        return MODAL_ON_RUNPOD_VOLUME
+    if mode == "serverless" and not settings.serverless_configured:
+        return SERVERLESS_NEEDS_CONFIG
+    if mode == "serverless" and storage in ("local", "modal_volume"):
+        return SERVERLESS_NEEDS_STORAGE
+    return None
 
 
 def _ts(value: str | None) -> float | None:
@@ -121,9 +139,10 @@ class ComputeService:
             if not self.changeable:
                 raise ServiceError(409, FIXED)
             if mode not in MODES:
-                raise ServiceError(409, f"unknown mode {mode!r}; use modal or worker")
-            if mode == "modal" and storage_backend(self.settings) == "local":
-                raise ServiceError(409, MODAL_NEEDS_STORAGE)
+                raise ServiceError(409, f"unknown mode {mode!r}; use modal, worker or serverless")
+            refusal = mode_refusal(self.settings, mode)
+            if refusal:
+                raise ServiceError(409, refusal)
             if mode != self.mode:
                 self.db.set_setting("mode", mode)
                 self.db.set_setting("mode_changed_at", iso_at(now))
@@ -141,11 +160,11 @@ class ComputeService:
     def _event(self, text: str, now: float) -> None:
         self._set("last_event", f"{iso_at(now)} {text}")
 
-    def fall_back_from_modal(self) -> None:
-        """At start-up: a stored modal mode on local storage becomes worker, so the app still starts."""
-        log.warning("compute: %s", MODAL_ON_LOCAL)
+    def fall_back(self, reason: str) -> None:
+        """At start-up: a stored mode these settings no longer allow becomes worker, so the app still starts."""
+        log.warning("compute: %s", reason)
         self.db.set_setting("mode", "worker")
-        self._event(MODAL_ON_LOCAL, self.clock())
+        self._event(reason, self.clock())
 
     # Status
 
@@ -197,6 +216,7 @@ class ComputeService:
             queued = self.db.list_jobs(state="queued", limit=ALL)
             in_flight = submitted[-1] if submitted else None
             month = month_of(now)
+            serverless = self._serverless_view(submitted)
             return {
                 "mode": self.mode,
                 "changeable": self.changeable,
@@ -208,17 +228,62 @@ class ComputeService:
                            "idle_delete_s": s.radar_pod_idle_delete_s,
                            "app_lost_delete_s": s.radar_pod_app_lost_delete_s},
                 "pod": self.pod_view(now),
+                "serverless": serverless,
                 "in_flight": ({"job_id": in_flight.id, "backend": job_backend(in_flight)}
                               if in_flight else None),
                 "queued": len(queued),
                 "held": [{"job_id": j.id, "hold_reason": j.hold_reason}
                          for j in reversed(queued) if j.hold_reason],
-                "problem": self.db.get_setting("problem"),
+                "problem": self._problem(serverless, now),
                 "last_event": self.db.get_setting("last_event"),
                 "spend_month_usd": round(self.costs.spend_for_month(month, now), 6),
                 "budget_usd": s.gpu_monthly_budget_usd,
                 "month": month,
             }
+
+    def serverless_view(self) -> dict:
+        """The serverless block GET /compute carries, for GET /gpu/status."""
+        with self._lock:
+            return self._serverless_view(self.db.list_jobs(state="submitted", limit=ALL))
+
+    def problem(self, now: float | None = None) -> str | None:
+        """The problem GET /compute reports, for GET /gpu/status."""
+        now = self.clock() if now is None else now
+        with self._lock:
+            return self._problem(self.serverless_view(), now)
+
+    def _serverless_view(self, submitted: list[Job]) -> dict:
+        """The serverless block of GET /compute. Health and status come only from a backend already built;
+        a restart shows none until the next poll."""
+        s = self.settings
+        built = self._built.get("serverless")
+        job = next((j for j in submitted if job_backend(j) == "serverless"), None)
+        last = built.last_status(job.modal_call_id) if built is not None and job and job.modal_call_id else None
+        return {
+            "configured": s.serverless_configured, "endpoint_id": s.runpod_endpoint_id,
+            "gpus": s.runpod_serverless_gpu_list, "idle_s": s.runpod_serverless_idle_s,
+            "price_per_s": s.runpod_serverless_price_usd_per_s,
+            "health": getattr(built, "health", None),
+            "job": ({"job_id": job.id, "status": last[0] if last else None, "submitted_at": job.submitted_at,
+                     "status_at": last[1] if last else None} if job else None),
+        }
+
+    def _problem(self, serverless: dict, now: float) -> str | None:
+        """The stored problem, else the serverless queue warning, else /health down for a minute while a
+        serverless job is submitted (only a poll reads /health, so nothing else would clear it)."""
+        stored = self.db.get_setting("problem")
+        if stored:
+            return stored
+        job = serverless["job"]
+        if job and job["status"] in (None, "IN_QUEUE") and job["submitted_at"]:
+            waited = now - parse_iso(job["submitted_at"])
+            workers = (serverless["health"] or {}).get("workers") or {}
+            if waited > self.settings.runpod_serverless_queue_warn_s and not workers.get("running"):
+                return QUEUE_WARNING.format(n=int(waited // 60), datacenter=self.settings.runpod_datacenter)
+        since = getattr(self._built.get("serverless"), "health_failed_since", None)
+        if job and since is not None and now - since >= HEALTH_DOWN_S:
+            return HEALTH_DOWN
+        return None
 
     # Holds
 
@@ -445,8 +510,8 @@ class ComputeService:
     def _start(self, now: float) -> None:
         s = self.settings
         one_pod = s.runpod_max_pod_hours * price_per_s("L4", s) * 3600
-        modal_jobs = sum(1 for j in self.db.list_jobs(state="submitted", limit=ALL) if job_backend(j) != "worker")
-        in_flight = worst_case(s) * modal_jobs
+        in_flight = sum(worst_case(s, job_backend(j)) for j in self.db.list_jobs(state="submitted", limit=ALL)
+                        if job_backend(j) != "worker")
         if self.costs.spend_for_month(month_of(now), now) + in_flight + one_pod > s.gpu_monthly_budget_usd:
             self.hold_queued("budget")
             self._set("problem", "Budget reached")

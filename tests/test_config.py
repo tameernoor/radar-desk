@@ -14,6 +14,9 @@ ENV_NAMES = [
     "WORKER_IMAGE", "WORKER_PUBLIC_URL", "WORKER_TUNNEL", "RUNPOD_API_KEY", "RUNPOD_VOLUME_ID",
     "RUNPOD_REGISTRY_AUTH_ID", "RUNPOD_DATACENTER", "RUNPOD_MAX_POD_HOURS",
     "RUNPOD_START_TIMEOUT_S", "RUNPOD_GPUS", "RADAR_POD_IDLE_DELETE_S", "RADAR_POD_APP_LOST_DELETE_S",
+    "RUNPOD_ENDPOINT_ID", "RUNPOD_S3_ACCESS_KEY_ID", "RUNPOD_S3_SECRET_ACCESS_KEY", "RUNPOD_SERVERLESS_GPUS",
+    "RUNPOD_SERVERLESS_PRICE_USD_PER_S", "RUNPOD_SERVERLESS_IDLE_S", "RUNPOD_SERVERLESS_VISIBILITY_S",
+    "RUNPOD_SERVERLESS_QUEUE_WARN_S",
 ]
 
 
@@ -166,6 +169,24 @@ def test_modal_gpu_needs_a_bucket_or_the_volume(make_services):
         create_app(svc.settings.model_copy(update={**modal, **ok}), svc, start_poller=False)
 
 
+def test_serverless_gpu_needs_config_and_reachable_storage(make_services):
+    from radar_desk.app import create_app
+
+    svc = make_services()
+    sls = {"gpu_backend": "serverless", "runpod_api_key": "k", "runpod_endpoint_id": "ep1"}
+    with pytest.raises(ConfigError, match="GPU_BACKEND=serverless: serverless needs RUNPOD_API_KEY"):
+        create_app(svc.settings.model_copy(update={"gpu_backend": "serverless", "s3_bucket": "b"}), svc,
+                   start_poller=False)
+    for bad in ({}, {"storage_backend": "modal_volume"}, {"storage_backend": "local", "s3_bucket": "b"}):
+        with pytest.raises(ConfigError, match="needs STORAGE_BACKEND=runpod_volume or S3_BUCKET"):
+            create_app(svc.settings.model_copy(update={**sls, **bad}), svc, start_poller=False)
+    for ok in ({"storage_backend": "runpod_volume"}, {"s3_bucket": "b"}):
+        create_app(svc.settings.model_copy(update={**sls, **ok}), svc, start_poller=False)
+    with pytest.raises(ConfigError, match="Modal cannot reach the RunPod volume"):
+        create_app(svc.settings.model_copy(update={"gpu_backend": "modal", "storage_backend": "runpod_volume"}),
+                   svc, start_poller=False)
+
+
 # Compute switch
 
 
@@ -229,3 +250,73 @@ def test_runpod_gpus_unknown_id_warns(monkeypatch, caplog):
         s = load_settings(_env_file=None)
     assert s.runpod_gpu_list == ["NVIDIA RTX A2000"]
     assert "NVIDIA RTX A2000 is not a GPU type this app knows" in caplog.text
+
+
+# RunPod Serverless
+
+
+def test_serverless_settings_and_defaults():
+    s = _settings()
+    assert s.runpod_endpoint_id is None and not s.serverless_configured
+    assert s.runpod_s3_access_key_id is None and s.runpod_s3_secret_access_key is None
+    assert s.runpod_serverless_gpus == "AMPERE_24,ADA_24"
+    assert s.runpod_serverless_gpu_list == ["AMPERE_24", "ADA_24"]
+    assert s.runpod_serverless_price_usd_per_s == 0.00031
+    assert s.runpod_serverless_idle_s == 60
+    assert (s.runpod_serverless_visibility_s, s.runpod_serverless_queue_warn_s) == (60, 300)
+    assert _settings(gpu_backend="serverless").gpu_backend == "serverless"
+    assert _settings(storage_backend="runpod_volume").storage_backend == "runpod_volume"
+
+
+def test_serverless_configured_needs_key_and_endpoint():
+    assert not _settings(runpod_api_key="k").serverless_configured
+    assert not _settings(runpod_endpoint_id="ep1").serverless_configured
+    assert _settings(runpod_api_key="k", runpod_endpoint_id="ep1").serverless_configured
+    # the pod settings are not needed for serverless, and serverless does not configure pods
+    assert not _settings(runpod_api_key="k", runpod_endpoint_id="ep1").runpod_configured
+
+
+def test_serverless_settings_from_env(monkeypatch):
+    monkeypatch.setenv("OWNER_TOKEN", "x")
+    monkeypatch.setenv("SESSION_SECRET", "y")
+    monkeypatch.setenv("GPU_BACKEND", "serverless")
+    monkeypatch.setenv("STORAGE_BACKEND", "runpod_volume")
+    monkeypatch.setenv("RUNPOD_ENDPOINT_ID", "ep-abc")
+    monkeypatch.setenv("RUNPOD_SERVERLESS_GPUS", "ADA_24, AMPERE_24,ADA_24,,")
+    monkeypatch.setenv("RUNPOD_SERVERLESS_IDLE_S", "120")
+    monkeypatch.setenv("RUNPOD_SERVERLESS_PRICE_USD_PER_S", "0.00019")
+    s = load_settings(_env_file=None)
+    assert (s.gpu_backend, s.storage_backend, s.runpod_endpoint_id) == ("serverless", "runpod_volume", "ep-abc")
+    assert s.runpod_serverless_gpu_list == ["ADA_24", "AMPERE_24"]  # order kept, repeats and empties dropped
+    assert (s.runpod_serverless_idle_s, s.runpod_serverless_price_usd_per_s) == (120, 0.00019)
+
+
+@pytest.mark.parametrize("value", [" , ", ","])
+def test_serverless_gpus_refuses_empty(monkeypatch, value):
+    monkeypatch.setenv("OWNER_TOKEN", "x")
+    monkeypatch.setenv("SESSION_SECRET", "y")
+    monkeypatch.setenv("RUNPOD_SERVERLESS_GPUS", value)
+    with pytest.raises(ConfigError, match="RUNPOD_SERVERLESS_GPUS names no pool") as info:
+        load_settings(_env_file=None)
+    assert "Value error" not in str(info.value)
+
+
+@pytest.mark.parametrize("value, ok", [(0, False), (1, True), (3600, True), (3601, False)])
+def test_serverless_idle_bounds(value, ok):
+    if ok:
+        assert _settings(runpod_serverless_idle_s=value).runpod_serverless_idle_s == value
+    else:
+        with pytest.raises(ValueError):
+            _settings(runpod_serverless_idle_s=value)
+
+
+def test_serverless_secrets_never_shown(monkeypatch):
+    values = {"RUNPOD_API_KEY": "rp-FFFF6666", "RUNPOD_S3_ACCESS_KEY_ID": "user_GGGG7777",
+              "RUNPOD_S3_SECRET_ACCESS_KEY": "rps_HHHH8888"}
+    for k, v in values.items():
+        monkeypatch.setenv(k, v)
+    s = _settings(runpod_endpoint_id="ep1")
+    shown = repr(s) + str(s) + str(s.model_dump())
+    assert s.runpod_s3_secret_access_key.get_secret_value() == "rps_HHHH8888"
+    for v in values.values():
+        assert v not in shown

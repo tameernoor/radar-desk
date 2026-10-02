@@ -30,7 +30,8 @@ RUN pip install --no-cache-dir \
     pandas \
     tqdm \
     scipy \
-    requests
+    requests \
+    "runpod>=1.10.1,<2"
 
 # NVIDIA_*: what the CUDA base image used to set; the container runtime reads them to expose the GPU
 ENV PYTHONUNBUFFERED=1 \
