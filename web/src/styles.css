@@ -227,6 +227,42 @@ kbd { font: 0.7rem var(--mono); padding: 0 0.3rem; border: 1px solid var(--line)
 .look-card .look-actions { display: flex; gap: 0.4rem; margin-top: 0.5rem; }
 .look-card .look-footer { color: var(--warn); font-size: 0.78rem; border-top: 1px solid var(--line); padding-top: 0.4rem; }
 
+.light-panel {
+  position: absolute; top: 0.6rem; right: 0.6rem; width: min(17rem, calc(100% - 1.2rem)); max-height: calc(100% - 1.2rem); overflow-y: auto;
+  background: rgb(27 30 35 / 0.96); border: 1px solid var(--line); border-radius: 6px; padding: 0.6rem 0.75rem; font-size: 0.8rem; z-index: 2;
+}
+.light-panel header { display: flex; justify-content: space-between; align-items: center; }
+.light-panel h2 { font-size: 0.95rem; margin: 0; }
+.light-panel header button { font-size: 0.8rem; padding: 0.15rem 0.45rem; }
+.light-panel h3 { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; margin: 0.75rem 0 0.35rem; }
+.light-panel .btn-group { flex-wrap: wrap; }
+.light-panel input[type="range"] { width: 100%; margin: 0.15rem 0 0.2rem; }
+.light-panel .inline input { width: 4.5rem; }
+.light-panel select { font-size: 0.8rem; padding: 0.1rem 0.3rem; }
+.light-row { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-top: 0.35rem; color: var(--muted); }
+.light-row output { color: var(--text); font-family: var(--mono); }
+.light-row > button { font-size: 0.8rem; padding: 0.15rem 0.45rem; }
+.light-range { margin: 0.2rem 0 0; font-family: var(--mono); color: var(--accent); }
+.light-actions { margin-top: 0.8rem; padding-top: 0.5rem; border-top: 1px solid var(--line); }
+.light-actions button { font-size: 0.8rem; padding: 0.15rem 0.45rem; }
+/* With both open, the look card sits left of the light panel. */
+.viewer-wrap:has(#light-panel:not([hidden])) .look-card {
+  right: calc(min(17rem, 100% - 1.2rem) + 1.2rem); width: min(24rem, calc(100% - min(17rem, 100% - 1.2rem) - 1.8rem));
+}
+
+/* Focus mode: the viewer pane covers the window, bars float over the image, the chat is hidden.
+   --toolbar-h and --bottom-h are measured by the workspace. */
+body.focus [data-persona-root] { display: none !important; }
+body.focus .viewer-pane { position: fixed; inset: 0; z-index: 50; }
+body.focus .viewer-wrap { position: absolute; inset: 0; }
+body.focus .viewer-toolbar, body.focus .viewer-bottom { position: absolute; left: 0; right: 0; z-index: 3; background: rgb(27 30 35 / 0.88); }
+body.focus .viewer-toolbar { top: 0; }
+body.focus .viewer-bottom { bottom: 0; }
+body.focus .look-card, body.focus .light-panel {
+  top: calc(var(--toolbar-h, 2.5rem) + 0.6rem); max-height: calc(100% - var(--toolbar-h, 2.5rem) - var(--bottom-h, 4rem) - 1.2rem);
+}
+body.focus .viewer-notice:not(.viewer-prompt) { top: calc(var(--toolbar-h, 2.5rem) + 1rem); }
+
 /* Provider note in the chat panel, above the composer. */
 .chat-status { margin: 0 0 0.3rem; padding: 0 0.9rem; font-size: 0.75rem; color: var(--muted); }
 .chat-status-warn { color: var(--warn); }
