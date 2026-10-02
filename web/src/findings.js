@@ -77,7 +77,7 @@ export function createFindings({ onSelect, onOrgan }) {
     const how = howOf(organ);
     return el(
       "div",
-      { class: "organ-head", "data-organ-head": organ, onclick: () => onOrgan(organ) },
+      { class: "organ-head", "data-organ-head": organ, onclick: () => onOrgan(organ, { toggle: false }) },
       el("span", { class: "dot", style: `background:${organCss(organ)}` }),
       el("strong", {}, organ),
       el("span", { class: "muted small" }, extra || howText(how)),
@@ -196,6 +196,12 @@ export function createFindings({ onSelect, onOrgan }) {
         node.classList.add("active");
         node.scrollIntoView({ block: "nearest" });
       }
+    },
+    markCurrentOrgan(organ) {
+      for (const chip of stripEl.querySelectorAll(".organ-chip")) chip.classList.toggle("current", chip.dataset.organ === organ);
+    },
+    clearCurrentOrgan() {
+      for (const chip of stripEl.querySelectorAll(".organ-chip.current")) chip.classList.remove("current");
     },
     scrollToOrgan(organ) {
       listEl.querySelector(`[data-group="${CSS.escape(organ)}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" });

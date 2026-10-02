@@ -63,6 +63,7 @@ const labelOf = (organ) => ws.scoredOrgans.find((o) => o.organ === organ)?.label
 function jumpToOrgan(organ, { scroll = true } = {}) {
   if (!labelOf(organ)) throw new Error(`Unknown organ: ${organ}. Use one of the 18 scored organs.`);
   ws.activeOrgan = organ;
+  ws.findings.markCurrentOrgan(organ);
   if (scroll) ws.findings.scrollToOrgan(organ);
   if (!ws.result) return { ok: false, organ, reason: "No result yet for this scan." };
   const stats = ws.result.organ_stats?.[organ];
@@ -78,6 +79,23 @@ function jumpToOrgan(organ, { scroll = true } = {}) {
   if (ws.boxOn) showScoringBox(organ, true);
   const how = ws.result.organs_scored.find((o) => o.organ === organ);
   return { ok: true, organ, centroid_mm: stats.centroid_mm, ml: stats.ml, how: how?.how ?? null, window_index: how?.window_index ?? null };
+}
+
+// Back to all organs: no isolation, no active organ, no scoring box.
+function clearOrgan() {
+  ws.activeOrgan = null;
+  ws.viewer.isolateOrgan(null);
+  ws.viewer.showBox(null);
+  setBoxOn(false);
+  ws.findings.clearCurrentOrgan();
+  clearNotice();
+}
+
+// A click on an organ chip or legend item: a second click on the active organ shows all organs
+// again. Organ headings in the list and the chat's jump_to_organ always jump.
+function toggleOrgan(organ) {
+  if (ws.activeOrgan === organ) return clearOrgan();
+  return jumpToOrgan(organ);
 }
 
 function selectFinding(keyOrName) {
@@ -183,7 +201,7 @@ function renderLegend(present) {
   const scored = ws.scoredOrgans.filter((o) => present.includes(o.label));
   const unscored = ws.labels.filter((l) => l.label > 0 && present.includes(l.label) && !ws.scoredOrgans.some((o) => o.label === l.label));
   const items = scored.map((o) =>
-    el("button", { type: "button", class: "legend-item", onclick: () => jumpToOrgan(o.organ) }, el("i", { style: `background:${organCss(o.organ)}` }), o.organ),
+    el("button", { type: "button", class: "legend-item", onclick: () => toggleOrgan(o.organ) }, el("i", { style: `background:${organCss(o.organ)}` }), o.organ),
   );
   if (unscored.length) {
     items.push(
@@ -467,10 +485,7 @@ function wireToolbar() {
     showScoringBox(ws.activeOrgan, !ws.boxOn);
   });
   $("look-button").addEventListener("click", showLookCard);
-  $("show-all").addEventListener("click", () => {
-    ws.viewer.isolateOrgan(null);
-    clearNotice();
-  });
+  $("show-all").addEventListener("click", clearOrgan);
   // Clicking an organ in the image scrolls the list to it.
   $("viewer").addEventListener("pointerup", () => {
     const organ = ws.viewer.location().organ;
@@ -530,7 +545,7 @@ async function main() {
 
   ws.findings = createFindings({
     onSelect: (key) => selectFinding(key),
-    onOrgan: (organ) => jumpToOrgan(organ),
+    onOrgan: (organ, { toggle = true } = {}) => (toggle ? toggleOrgan(organ) : jumpToOrgan(organ)),
   });
   ws.findings.setCatalog(catalog.findings, labels.scored_organs);
   ws.catalog = catalog.findings;
