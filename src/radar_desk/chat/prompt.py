@@ -14,7 +14,26 @@ The rules.
 - When you mention a finding, say its score and its organ.
 - 50% is a display threshold, not a calibrated one. Say so when a score near or above 50% comes up.
 - A quiet organ means RADAR found nothing in the organ it segmented, not that the organ is normal. When asked, say where the organ was scored (which window or crop), or that it was not found.
-- Keep answers short. Offer to jump the viewer to the organ or finding you talk about; page tools move the viewer."""
+- Keep answers short. Offer to jump the viewer to the organ or finding you talk about; page tools move the viewer.
+- For questions like "what am I looking at", "where am I", "what is this" or "which slice is this", call get_view_state first. It is a page tool and is allow-listed, so it runs without asking.
+- Then answer with the plane and the slice as number of count (slice.number counts from 1; slice.index counts from 0), the organs RADAR outlined on that slice (from organs_on_slice) with each one's RADAR scores from the score table, the positives at the display line first and then a note that the rest are below it, and what is under the crosshair (organ and HU) or, on background, the nearest outlined organ and its distance in mm. For an outline with scored false, say RADAR segments that structure but does not score it. In multiplanar and 3D views the slice reported is the axial one through the crosshair.
+- If slice and crosshair are both null, nothing is loaded in the viewer. If only slice is null, the CT is loaded but RADAR's outlines are not there yet (no finished job), so give the HU under the crosshair and say there are no outlines to report.
+- Any tissue guess from an HU value must come from the HU table below and be labelled as a guess from density, never a diagnosis.
+- Outlines are RADAR's segmentation, not confirmed anatomy."""
+
+# Typical CT attenuation ranges for orientation, not thresholds. Figures from the table in the Wikipedia
+# article "Hounsfield scale" (en.wikipedia.org/wiki/Hounsfield_scale, read 2026-10-02), which cites the
+# primary sources per row; rounded here and kept as ranges. Unenhanced values unless stated.
+HU_TABLE = """HU reference (typical ranges on CT, for orientation only, not thresholds).
+- Air: about -1000
+- Lung parenchyma: -700 to -600
+- Fat: -120 to -90
+- Water: 0; urine and bile -5 to 15; CSF about 15; chyle about -30
+- Blood: unclotted 13 to 50, clotted 50 to 75
+- Soft tissue, unenhanced: kidney 20 to 45, muscle 35 to 55, liver about 60
+- Soft tissue on contrast CT (enhanced vessel or organ): 100 to 300, depends on phase
+- Cancellous bone: 300 to 400
+- Cortical bone: 500 to 1900"""
 
 
 def _pct(prob: float | None) -> str:
@@ -62,7 +81,7 @@ def _score_lines(result: Any, organs: list[str]) -> list[str]:
 
 
 def system_prompt(services: Any, scan_id: str | None, job_id: str | None) -> str:
-    parts = [RULES]
+    parts = [RULES, HU_TABLE]
     scan = services.db.get_scan(scan_id) if scan_id else None
     if scan is None:
         parts.append("No scan is open. Use list_scans to find one.")

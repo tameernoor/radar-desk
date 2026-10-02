@@ -2,6 +2,7 @@ import "./styles.css";
 import { ApiError, get, post } from "./api.js";
 import { mountChat } from "./chat.js";
 import { createFindings } from "./findings.js";
+import { buildLookCard } from "./lookcard.js";
 import { bytes, dims, el, elapsed, shortId, spacing, usd, when } from "./format.js";
 import { wireLogout } from "./login.js";
 import { registerPageTools } from "./pagetools.js";
@@ -25,6 +26,8 @@ const ws = {
   boxOn: false,
   viewer: null,
   findings: null,
+  catalog: [],
+  chat: null,
   ctLoaded: false,
 };
 
@@ -124,6 +127,7 @@ function setWindow(preset) {
 
 function setSlice(name) {
   ws.viewer.setSliceType(name);
+  closeStaleCard();
   for (const b of document.querySelectorAll("[data-slice]")) b.setAttribute("aria-pressed", String(b.dataset.slice === name));
 }
 
@@ -145,6 +149,7 @@ function viewState() {
     threshold: t / 100,
     threshold_pct: t,
     ...ws.viewer.state(),
+    ...ws.viewer.sliceState(),
   };
 }
 
@@ -358,6 +363,83 @@ function offerCT() {
   loadCT();
 }
 
+// ---------- what am I looking at ----------
+
+const LOOK_QUESTION = "What am I looking at?";
+
+// Built from fresh view state each time; no model call, so it works without the chat.
+function showLookCard() {
+  const card = buildLookCard(viewState(), ws.result?.findings || [], ws.catalog);
+  const box = $("look-card");
+  const close = el("button", { type: "button", onclick: hideLookCard, "aria-label": "Close" }, "Close");
+  const parts = [el("header", {}, el("h2", {}, LOOK_QUESTION), close)];
+  if (card.empty) parts.push(el("p", {}, card.message));
+  if (card.plane) parts.push(el("p", {}, el("strong", {}, card.plane)));
+  if (card.organs.length) {
+    parts.push(el("p", { class: "muted small" }, "RADAR outlined these on this slice, largest first."));
+    parts.push(
+      el(
+        "ul",
+        {},
+        card.organs.map((o) =>
+          el(
+            "li",
+            { class: "look-organ" },
+            el("span", { class: "dot", style: `background:${o.scored ? organCss(o.organ) : `rgb(${UNSCORED_GREY.join(" ")})`}` }),
+            " ",
+            el("strong", {}, o.organ),
+            el("span", { class: "muted" }, `${o.percent}% of the outlined area on this slice`),
+            o.note ? el("div", { class: "muted small" }, o.note) : null,
+            o.findings.map((f) =>
+              el(
+                "div",
+                { class: `look-finding${f.positive ? " positive" : ""}`, title: f.positive ? "At or above the display line" : null },
+                el("span", {}, f.finding, f.positive ? el("span", { class: "line-tag" }, "at or above line") : null),
+                el("span", {}, f.score_text),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+  if (card.note) parts.push(el("p", { class: "muted" }, card.note));
+  if (card.point?.where) parts.push(el("p", {}, card.point.where));
+  if (card.point) parts.push(el("p", {}, card.point.hu));
+  parts.push(el("div", { class: "look-actions" }, el("button", { type: "button", onclick: askChat }, "Ask the chat")));
+  parts.push(el("p", { class: "look-footer" }, card.footer));
+  box.replaceChildren(...parts);
+  box.hidden = false;
+  box.focus();
+  lookSlice = sliceKey();
+}
+
+function hideLookCard({ refocus = true } = {}) {
+  $("look-card").hidden = true;
+  if (refocus) $("look-button").focus();
+}
+
+// Which slice the card describes: the view type and the crosshair's fraction along the
+// displayed plane's normal (NiiVue's RAS order: x, y, z). Cheap, no pass over the mask.
+let lookSlice = null;
+function sliceKey() {
+  const type = ws.viewer.state().slice_type;
+  const axis = { sagittal: 0, coronal: 1 }[type] ?? 2;
+  return `${type}:${ws.viewer.nv.scene.crosshairPos[axis]}`;
+}
+
+// A card about another slice would be stale, so it closes; w reopens it.
+function closeStaleCard() {
+  if (!$("look-card").hidden && sliceKey() !== lookSlice) hideLookCard({ refocus: false });
+}
+
+// persona 4.25 controller: open() shows the panel, submitMessage(text) sends it as the user.
+function askChat() {
+  if (!ws.chat) return notice("The chat is not available.");
+  ws.chat.open();
+  if (!ws.chat.submitMessage(LOOK_QUESTION)) notice("The chat could not send right now; try again.");
+}
+
 // ---------- wiring ----------
 
 function wireToolbar() {
@@ -374,6 +456,7 @@ function wireToolbar() {
     if (!ws.activeOrgan) return notice("Select a finding or an organ first.");
     showScoringBox(ws.activeOrgan, !ws.boxOn);
   });
+  $("look-button").addEventListener("click", showLookCard);
   $("show-all").addEventListener("click", () => {
     ws.viewer.isolateOrgan(null);
     clearNotice();
@@ -411,6 +494,8 @@ function wireKeys() {
     else if (k === "[") setThreshold(ws.findings.state.threshold - 5);
     else if (k === "]") setThreshold(ws.findings.state.threshold + 5);
     else if (k === "m") setSlice(ws.viewer.state().slice_type === "multiplanar" ? "axial" : "multiplanar");
+    else if (k === "w") showLookCard();
+    else if (k === "Escape" && !$("look-card").hidden) hideLookCard();
     else return;
     e.preventDefault();
   });
@@ -438,13 +523,20 @@ async function main() {
     onOrgan: (organ) => jumpToOrgan(organ),
   });
   ws.findings.setCatalog(catalog.findings, labels.scored_organs);
-  ws.viewer = createViewer($("viewer"), { onLocation: renderReadout, onWindow: markWindow });
+  ws.catalog = catalog.findings;
+  ws.viewer = createViewer($("viewer"), {
+    onLocation: (loc) => {
+      renderReadout(loc);
+      closeStaleCard();
+    },
+    onWindow: markWindow,
+  });
 
   renderScanBar(scan);
   wireToolbar();
   wireKeys();
 
-  mountChat({ target: "#workspace-main", context: () => ({ scan_id: ws.scan.id, job_id: ws.job?.id ?? null }) });
+  ws.chat = mountChat({ target: "#workspace-main", context: () => ({ scan_id: ws.scan.id, job_id: ws.job?.id ?? null }) });
   const tools = await registerPageTools({ viewState, jumpToOrgan, selectFinding, setWindow, setThreshold, showScoringBox, toggleMask });
   window.__radar = { viewState, selectFinding, jumpToOrgan, setWindow, setThreshold, showScoringBox, toggleMask, tools, viewer: ws.viewer };
 

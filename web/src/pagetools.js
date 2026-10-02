@@ -21,7 +21,12 @@ function definitions(ctx) {
     {
       name: "get_view_state",
       description:
-        "Read the viewer: scan_id, job_id, crosshair position in mm, HU and mask label under the crosshair, active organ and finding, display threshold, window preset, whether the mask is shown.",
+        "Call this first for questions like 'what am I looking at?'. Returns the plane on screen and the slice as {axis, index, number, count}; " +
+        "index counts from 0, so tell the user slice number of count. In multiplanar and 3D views the slice is the axial one through the crosshair. " +
+        "Also returns " +
+        "the organs RADAR outlined on that slice with their share of the outlined pixels (largest first, and whether each is one of the 18 scored organs), " +
+        "what is under the crosshair (mm, HU, mask label and organ), and the nearest outlined organ with its in-plane distance when the crosshair is on background. " +
+        "Also scan_id, job_id, active organ and finding, display threshold, window preset and whether the mask is shown.",
       inputSchema: { type: "object", properties: {} },
       execute: () => ctx.viewState(),
     },

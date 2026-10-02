@@ -368,3 +368,49 @@ def test_system_prompt_says_when_scores_come_from_an_older_job(seeded):
     text = system_prompt(svc, scan.id, queued.id)
     assert f"Job {queued.id} on screen is queued; the scores below are from job {job.id}." in text
     assert "on screen" not in system_prompt(svc, scan.id, job.id)
+
+
+def test_system_prompt_view_rules_and_hu_table(make_services):
+    text = system_prompt(make_services(), None, None)
+    assert 'or "which slice is this", call get_view_state first.' in text
+    assert "be labelled as a guess from density, never a diagnosis" in text
+    assert "Outlines are RADAR's segmentation, not confirmed anatomy." in text
+    assert "nothing is loaded in the viewer" in text
+    assert "the CT is loaded but RADAR's outlines are not there yet" in text
+    assert "- Air: about -1000" in text
+    assert "- Cancellous bone: 300 to 400" in text
+    assert "- Cortical bone: 500 to 1900" in text
+
+
+VIEW_STATE = {
+    "scan_id": "s", "job_id": "j", "plane": "axial",
+    "slice": {"axis": "axial", "index": 41, "number": 42, "count": 120},
+    "organs_on_slice": [
+        {"organ": "Liver", "label": 21, "pixels": 9000, "percent_of_mask": 81.8, "scored": True},
+        {"organ": "Spleen", "label": 30, "pixels": 2000, "percent_of_mask": 18.2, "scored": True},
+    ],
+    "crosshair": {"mm": [10.0, -40.0, 55.0], "hu": 58, "label": 21, "organ": "Liver"},
+    "nearest_organ": None,
+}
+
+
+async def test_what_am_i_looking_at_reads_view_state_first(seeded):
+    svc, scan, job = seeded
+    llm = FakeLLM([
+        tool_turn(ToolCall("call_v", "get_view_state", {})),
+        text_turn("Axial slice 42 of 120. Liver and spleen are outlined."),
+    ])
+    tools = [*PAGE_TOOLS, {"name": "get_view_state", "description": "Read the viewer", "origin": "webmcp"}]
+    agent = ChatAgent(svc, llm)
+    frames = await run(agent.dispatch(body(scan.id, job.id, text="What am I looking at?", client_tools=tools)))
+    assert events(frames)[-1] == "await"
+    awaited = frames[-1]["data"]
+    assert awaited["toolName"] == "get_view_state" and awaited["toolCallId"] == "call_v"
+    output = {"content": [{"type": "text", "text": json.dumps(VIEW_STATE)}]}
+    frames = await run(agent.resume({"executionId": awaited["executionId"], "toolOutputs": {"call_v": output}}))
+    assert events(frames)[0] == "turn_start" and frames[0]["data"]["iteration"] == 2
+    assert events(frames)[-2:] == ["turn_complete", "execution_complete"]
+    tool_msg = llm.calls[1]["messages"][-1]
+    assert tool_msg["tool_call_id"] == "call_v"
+    assert json.loads(tool_msg["content"])["slice"] == {"axis": "axial", "index": 41, "number": 42, "count": 120}
+    assert svc.db.get_execution(awaited["executionId"]).state == "done"

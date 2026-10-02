@@ -190,10 +190,29 @@ html:has(.workspace-page), .workspace-page { height: 100%; }
 }
 .viewer-notice p { margin: 0; }
 .viewer-prompt { top: 40%; border-color: var(--warn); }
-.viewer-bottom { display: flex; gap: 1rem; padding: 0.35rem 0.6rem; background: var(--panel); border-top: 1px solid var(--line); align-items: center; flex-wrap: wrap; }
+.viewer-bottom { display: flex; gap: 0.4rem 1rem; padding: 0.35rem 0.6rem; background: var(--panel); border-top: 1px solid var(--line); align-items: center; flex-wrap: wrap; }
 .readout { font-family: var(--mono); font-size: 0.8rem; min-width: 22rem; }
 .legend { display: flex; flex-wrap: wrap; gap: 0.25rem 0.7rem; font-size: 0.75rem; }
 .legend-item { display: inline-flex; align-items: center; gap: 0.3rem; background: none; border: none; padding: 0; color: var(--text); font-size: inherit; }
 .legend-item.dim { color: var(--muted); }
 .legend-item i { width: 0.7rem; height: 0.7rem; border-radius: 2px; display: inline-block; }
 .footer-workspace { padding: 0.35rem 1rem; }
+
+.keys-help { width: 100%; margin: 0; display: flex; flex-wrap: wrap; gap: 0.2rem 0.9rem; font-size: 0.72rem; color: var(--muted); }
+kbd { font: 0.7rem var(--mono); padding: 0 0.3rem; border: 1px solid var(--line); border-radius: 3px; background: var(--panel-2); color: var(--text); }
+
+.look-card {
+  position: absolute; top: 0.6rem; right: 0.6rem; width: min(24rem, calc(100% - 1.2rem)); max-height: calc(100% - 1.2rem); overflow-y: auto;
+  background: rgb(27 30 35 / 0.96); border: 1px solid var(--line); border-radius: 6px; padding: 0.7rem 0.8rem; font-size: 0.85rem; z-index: 2;
+}
+.look-card header { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
+.look-card h2 { font-size: 0.95rem; margin: 0; }
+.look-card p { margin: 0.4rem 0; }
+.look-card ul { list-style: none; margin: 0.3rem 0; padding: 0; }
+.look-card .look-organ { margin: 0.45rem 0; }
+.look-card .look-organ strong { margin-right: 0.3rem; }
+.look-card .look-finding { display: flex; justify-content: space-between; gap: 0.6rem; padding-left: 1rem; color: var(--muted); }
+.look-card .look-finding.positive { color: var(--text); font-weight: 600; }
+.look-card .line-tag { margin-left: 0.4rem; padding: 0 0.3rem; border: 1px solid var(--accent); border-radius: 3px; color: var(--accent); font-size: 0.7rem; font-weight: 400; white-space: nowrap; }
+.look-card .look-actions { display: flex; gap: 0.4rem; margin-top: 0.5rem; }
+.look-card .look-footer { color: var(--warn); font-size: 0.78rem; border-top: 1px solid var(--line); padding-top: 0.4rem; }

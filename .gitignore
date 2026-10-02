@@ -15,3 +15,4 @@ fixtures/*.nii.gz
 fixtures/expected/radar-web/*.json
 .env.*
 !.env.example
+web/.smoke-out/
