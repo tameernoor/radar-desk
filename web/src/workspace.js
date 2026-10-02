@@ -4,14 +4,15 @@ import { mountChat } from "./chat.js";
 import { createFindings } from "./findings.js";
 import { buildLookCard } from "./lookcard.js";
 import { bytes, dims, el, elapsed, shortId, spacing, usd, when } from "./format.js";
-import { rangeOf, sliderFromWidth, widthFromSlider } from "./light.js";
+import { COLORMAPS, rangeOf, sliderFromWidth, widthFromSlider } from "./light.js";
 import { wireLogout } from "./login.js";
 import { registerPageTools } from "./pagetools.js";
 import { organCss, UNSCORED_GREY } from "./palette.js";
+import { recipeFor } from "./recipes.js";
 import { createViewer, rawBytes, tooBig, WINDOWS } from "./viewer.js";
 
 const TERMINAL = new Set(["done", "failed", "cancelled"]);
-const WINDOW_KEYS = { 1: "soft_tissue", 2: "liver", 3: "bone", 4: "lung" };
+const WINDOW_KEYS = { 1: "soft_tissue", 2: "liver", 3: "bone", 4: "lung", 5: "angio" };
 
 const $ = (id) => document.getElementById(id);
 
@@ -66,6 +67,7 @@ function jumpToOrgan(organ, { scroll = true } = {}) {
   if (!labelOf(organ)) throw new Error(`Unknown organ: ${organ}. Use one of the 18 scored organs.`);
   ws.activeOrgan = organ;
   ws.findings.markCurrentOrgan(organ);
+  syncControls();
   if (scroll) ws.findings.scrollToOrgan(organ);
   if (!ws.result) return { ok: false, organ, reason: "No result yet for this scan." };
   const stats = ws.result.organ_stats?.[organ];
@@ -107,6 +109,31 @@ function selectFinding(keyOrName) {
   const jumped = jumpToOrgan(f.organ, { scroll: false });
   ws.findings.setActive(f.key);
   return { ...jumped, key: f.key, finding: f.finding, prob: ws.findings.probOf(f.key) };
+}
+
+// An organ or finding the way it is usually read: the jump, then the recipe's window, the organ in the
+// middle of the view at the recipe's zoom, and the scoring box. A failed jump changes nothing else.
+function setViewFor(target) {
+  const r = recipeFor(target, (q) => ws.findings.finding(q));
+  const jumped = r.key ? selectFinding(r.key) : jumpToOrgan(r.organ);
+  if (!jumped.ok) return { ok: false, target, organ: r.organ, reason: jumped.reason };
+  setWindow(r.preset);
+  ws.viewer.centreOn(jumped.centroid_mm, r.zoom);
+  const box = showScoringBox(r.organ, true);
+  const v = ws.viewer.state();
+  return {
+    ok: true,
+    target,
+    organ: r.organ,
+    finding: r.finding,
+    key: r.key,
+    window_preset: v.window_preset,
+    window_hu: v.window_hu,
+    zoom: v.zoom,
+    scoring_box: box.ok ? { on: true, how: box.how, window_index: box.window_index } : { on: false, reason: box.reason },
+    why: r.why,
+    note: r.note,
+  };
 }
 
 function setBoxOn(on) {
@@ -164,6 +191,19 @@ function resetLight() {
   syncControls();
 }
 
+// Reset first, then gamma, invert and colour map; the reducer throws on bad values. The colour map is
+// checked before anything applies, so a bad one changes nothing.
+function setLight({ gamma, invert, colormap, reset } = {}) {
+  if (gamma === undefined && invert === undefined && colormap === undefined && !reset) throw new Error("Give at least one of gamma, invert, colormap or reset.");
+  if (colormap !== undefined && !COLORMAPS.includes(colormap)) throw new Error(`Unknown colour map: ${colormap}. Use one of ${COLORMAPS.join(", ")}.`);
+  if (reset) ws.viewer.resetLight();
+  if (gamma !== undefined) ws.viewer.setGamma(gamma);
+  if (invert !== undefined) ws.viewer.setInvert(invert);
+  if (colormap !== undefined) ws.viewer.setColormap(colormap);
+  const v = ws.viewer.state();
+  return { ok: true, gamma: v.gamma, invert: v.invert, colormap: v.colormap };
+}
+
 function setZoom(zoom) {
   ws.viewer.setZoom(zoom);
   return { ok: true, zoom: ws.viewer.state().zoom };
@@ -203,6 +243,9 @@ function syncControls(from = null) {
   press("[data-outline]", v.outline);
   for (const input of document.querySelectorAll("[data-mask-opacity]")) if (input !== from) input.value = String(Math.round(v.mask_opacity * 100));
   press("#box-toggle", ws.boxOn);
+  const viewFor = $("view-for");
+  viewFor.textContent = viewFor.title = `View for ${ws.activeOrgan ?? "organ"}`;
+  viewFor.classList.toggle("muted", !ws.activeOrgan);
   press("#focus-toggle", ws.focus);
   press("#light-toggle", !$("light-panel").hidden);
   const hu = (x) => String(Math.round(x * 10) / 10);
@@ -211,7 +254,7 @@ function syncControls(from = null) {
   set("wl", Math.round(w.level));
   $("ww-value").textContent = hu(w.width);
   $("wl-value").textContent = hu(w.level);
-  $("window-range").textContent = `${hu(w.min)} to ${hu(w.max)} HU`;
+  $("window-range").textContent = `${WINDOWS[v.window_preset]?.label ?? "Custom"}, ${hu(w.min)} to ${hu(w.max)} HU`;
   set("gamma", v.gamma);
   $("gamma-value").textContent = v.gamma.toFixed(2);
   press("#invert", v.invert);
@@ -584,6 +627,10 @@ function wireToolbar() {
     if (!ws.activeOrgan) return notice("Select a finding or an organ first.");
     showScoringBox(ws.activeOrgan, !ws.boxOn);
   });
+  $("view-for").addEventListener("click", () => {
+    if (!ws.activeOrgan) return notice("Select a finding or an organ first.");
+    setViewFor(ws.activeOrgan);
+  });
   $("look-button").addEventListener("click", showLookCard);
   $("show-all").addEventListener("click", clearOrgan);
   // Clicking an organ in the image scrolls the list to it.
@@ -638,6 +685,10 @@ function wireKeys() {
     else if (k === "+" || k === "=") ws.viewer.zoomBy(1);
     else if (k === "-") ws.viewer.zoomBy(-1);
     else if (k === "Escape" && !$("look-card").hidden) hideLookCard();
+    else if (k === "Escape" && !ws.focus && !$("light-panel").hidden) {
+      toggleLight(false);
+      $("light-toggle").focus();
+    }
     else if (k === "Escape" && ws.focus) toggleFocus(false);
     else return;
     e.preventDefault();
@@ -683,7 +734,7 @@ async function main() {
   syncControls();
 
   ws.chat = mountChat({ target: "#workspace-main", context: () => ({ scan_id: ws.scan.id, job_id: ws.job?.id ?? null }) });
-  const actions = { viewState, jumpToOrgan, selectFinding, setWindow, setWindowLevel, setThreshold, showScoringBox, toggleMask, toggleFocus, setZoom };
+  const actions = { viewState, jumpToOrgan, selectFinding, setWindow, setWindowLevel, setThreshold, showScoringBox, toggleMask, toggleFocus, setZoom, setViewFor, setLight };
   const tools = await registerPageTools(actions);
   window.__radar = { ...actions, toggleLight, resetLight, tools, viewer: ws.viewer };
 

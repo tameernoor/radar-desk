@@ -19,7 +19,10 @@ The rules.
 - Then answer with the plane and the slice as number of count (slice.number counts from 1; slice.index counts from 0), the organs RADAR outlined on that slice (from organs_on_slice) with each one's RADAR scores from the score table, the positives at the display line first and then a note that the rest are below it, and what is under the crosshair (organ and HU) or, on background, the nearest outlined organ and its distance in mm. For an outline with scored false, say RADAR segments that structure but does not score it. In multiplanar view the slice reported is the main view's plane (main_plane); the two small reference views follow it and are listed in reference_planes.
 - If slice and crosshair are both null, nothing is loaded in the viewer. If only slice is null, the CT is loaded but RADAR's outlines are not there yet (no finished job), so give the HU under the crosshair and say there are no outlines to report.
 - Any tissue guess from an HU value must come from the HU table below and be labelled as a guess from density, never a diagnosis.
-- Outlines are RADAR's segmentation, not confirmed anatomy."""
+- Outlines are RADAR's segmentation, not confirmed anatomy.
+- To show an organ or a finding the way it is usually read, call set_view_for; it jumps, sets the recipe's window and zoom and shows the scoring box. Then say which window it set and why, from the viewing recipes table.
+- Recommend window settings only from the viewing recipes table; set_window_level is for a user who asks for other numbers.
+- set_light changes gamma, invert and the colour map; colour maps are a spotting aid, not the reading standard."""
 
 # Typical CT attenuation ranges for orientation, not thresholds. Figures from the table in the Wikipedia
 # article "Hounsfield scale" (en.wikipedia.org/wiki/Hounsfield_scale, read 2026-10-02), which cites the
@@ -34,6 +37,34 @@ HU_TABLE = """HU reference (typical ranges on CT, for orientation only, not thre
 - Soft tissue on contrast CT (enhanced vessel or organ): 100 to 300, depends on phase
 - Cancellous bone: 300 to 400
 - Cortical bone: 500 to 1900"""
+
+# Window and zoom per scored organ for set_view_for. Widths and levels from Radiopaedia, "Windowing (CT)"
+# (radiopaedia.org/articles/windowing-ct, last revised 7 Jan 2025, read 2026-10-03), its abdomen, chest and
+# spine rows. It has rows only for the liver, vessels, bone and lungs, so every other scored organ takes the
+# abdomen soft tissue window.
+# Mirrors web/src/recipes.js and WINDOWS in web/src/light.js; a unit test there fails on any drift.
+VIEW_RECIPES = """Viewing recipes (the window each scored organ is usually read in; set_view_for applies them).
+Windows: soft_tissue W 400 L 50, liver W 150 L 30, bone W 1800 L 400, lung W 1500 L -600, angio W 600 L 200.
+- Liver: liver. narrow liver window; small density differences inside the parenchyma show
+- Pancreas: soft_tissue. abdomen soft tissue window; organ parenchyma, fluid and fat separate without clipping enhancing vessels (the source gives no pancreas window; the abdomen soft tissue one is used)
+- Kidney: soft_tissue. abdomen soft tissue window; organ parenchyma, fluid and fat separate without clipping enhancing vessels
+- Gallbladder: soft_tissue. abdomen soft tissue window; organ parenchyma, fluid and fat separate without clipping enhancing vessels
+- Spleen: soft_tissue. abdomen soft tissue window; organ parenchyma, fluid and fat separate without clipping enhancing vessels
+- Adrenal gland: soft_tissue. abdomen soft tissue window; organ parenchyma, fluid and fat separate without clipping enhancing vessels
+- Stomach: soft_tissue. abdomen soft tissue window; organ parenchyma, fluid and fat separate without clipping enhancing vessels
+- Duodenum: soft_tissue. abdomen soft tissue window; organ parenchyma, fluid and fat separate without clipping enhancing vessels
+- Small bowel: soft_tissue. abdomen soft tissue window; organ parenchyma, fluid and fat separate without clipping enhancing vessels
+- Large bowel: soft_tissue. abdomen soft tissue window; organ parenchyma, fluid and fat separate without clipping enhancing vessels
+- Bladder: soft_tissue. abdomen soft tissue window; organ parenchyma, fluid and fat separate without clipping enhancing vessels
+- Esophagus: soft_tissue. abdomen soft tissue window; organ parenchyma, fluid and fat separate without clipping enhancing vessels
+- Aorta: angio. vascular window; the enhanced lumen, the wall and calcification stay apart instead of saturating
+- Portal vein: angio. vascular window; the enhanced lumen, the wall and calcification stay apart instead of saturating
+- Heart: angio. vascular window; the enhanced lumen, the wall and calcification stay apart instead of saturating
+- Lung: lung. wide lung window centred on air; parenchyma and nodules show at the lung bases
+- Rib: bone. wide bone window; cortex and marrow show instead of saturating white
+- Sacrum: bone. wide bone window; cortex and marrow show instead of saturating white
+Colour maps are a spotting aid, not the reading standard.
+A viewing setting is never a diagnosis."""
 
 
 def _pct(prob: float | None) -> str:
@@ -81,7 +112,7 @@ def _score_lines(result: Any, organs: list[str]) -> list[str]:
 
 
 def system_prompt(services: Any, scan_id: str | None, job_id: str | None) -> str:
-    parts = [RULES, HU_TABLE]
+    parts = [RULES, HU_TABLE, VIEW_RECIPES]
     scan = services.db.get_scan(scan_id) if scan_id else None
     if scan is None:
         parts.append("No scan is open. Use list_scans to find one.")

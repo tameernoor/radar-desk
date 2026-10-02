@@ -13,6 +13,7 @@ Research use only. Public and research scans only. This is not a medical device.
 - Press `w` for "What am I looking at?": the slice, every organ RADAR outlined on it with its scores, and what is under the crosshair. No model call.
 - Press `m` for one main view plus two reference views. Click a reference view to make it the main one.
 - Press `f` for focus mode, the image over the whole window with a Light panel for window width and level in HU, gamma, invert and colour map. `+` and `-` or ctrl-wheel zoom, shift-drag pans.
+- Click "View for {organ}" (or ask the chat) to see an organ the way it is usually read: its window from a cited table (Angio, key `5`, for the aorta), centred and zoomed, with RADAR's scoring box.
 - Ask the chat ("show me the liver", "what did RADAR flag above 50%?", "what am I looking at?"). It can move the viewer.
 - Export scores as CSV or JSON, and the organ mask as NIfTI.
 

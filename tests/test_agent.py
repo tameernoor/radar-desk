@@ -385,6 +385,19 @@ def test_system_prompt_view_rules_and_hu_table(make_services):
     assert "- Cortical bone: 500 to 1900" in text
 
 
+def test_system_prompt_view_recipes(make_services):
+    text = system_prompt(make_services(), None, None)
+    assert "To show an organ or a finding the way it is usually read, call set_view_for;" in text
+    assert "Recommend window settings only from the viewing recipes table; set_window_level is for a user who asks for other numbers." in text
+    assert "set_light changes gamma, invert and the colour map; colour maps are a spotting aid, not the reading standard." in text
+    assert "- Aorta: angio. vascular window; the enhanced lumen, the wall and calcification stay apart instead of saturating" in text
+    assert (
+        "- Pancreas: soft_tissue. abdomen soft tissue window; organ parenchyma, fluid and fat separate without clipping "
+        "enhancing vessels (the source gives no pancreas window; the abdomen soft tissue one is used)"
+    ) in text
+    assert "A viewing setting is never a diagnosis." in text
+
+
 VIEW_STATE = {
     "scan_id": "s", "job_id": "j", "plane": "axial",
     "slice": {"axis": "axial", "index": 41, "number": 42, "count": 120},

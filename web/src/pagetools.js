@@ -1,5 +1,6 @@
-// The ten WebMCP page tools. They only read or move the view.
+// The twelve WebMCP page tools. They only read or move the view.
 import { WebMcpBridge } from "@runtypelabs/persona";
+import { COLORMAPS, WINDOWS } from "./light.js";
 import { ORGAN_COLOURS } from "./palette.js";
 
 export const PAGE_TOOL_NAMES = [
@@ -13,6 +14,8 @@ export const PAGE_TOOL_NAMES = [
   "set_window_level",
   "set_zoom",
   "toggle_focus",
+  "set_view_for",
+  "set_light",
 ];
 
 const ORGANS = Object.keys(ORGAN_COLOURS);
@@ -57,14 +60,14 @@ function definitions(ctx) {
       description: "Set the CT window preset.",
       inputSchema: {
         type: "object",
-        properties: { preset: { type: "string", enum: ["soft_tissue", "liver", "bone", "lung"] } },
+        properties: { preset: { type: "string", enum: Object.keys(WINDOWS) } },
         required: ["preset"],
       },
       execute: ({ preset }) => ctx.setWindow(preset),
     },
     {
       name: "set_window_level",
-      description: "Set the CT window by width and level in HU, for windows the four presets do not cover. Width 1 to 4000, level -1200 to 2000; values outside are clamped.",
+      description: "Set the CT window by width and level in HU, for windows the five presets do not cover. Width 1 to 4000, level -1200 to 2000; values outside are clamped.",
       inputSchema: {
         type: "object",
         properties: {
@@ -88,6 +91,35 @@ function definitions(ctx) {
       description: "Focus mode: the viewer fills the window and the findings list and this chat are hidden until the user presses Escape or f. Omit 'on' to toggle.",
       inputSchema: { type: "object", properties: { on: { type: "boolean" } } },
       execute: ({ on } = {}) => ctx.toggleFocus(on),
+    },
+    {
+      name: "set_view_for",
+      description:
+        "Show an organ or a finding the way it is usually read: jump to it (a finding is also selected in the list), set the window from the viewing recipes table, " +
+        "centre it at the recipe's zoom and show its scoring box. Pass one of the 18 scored organs, or a finding by upstream key, 'Organ_Finding' or name. " +
+        "Returns the window set, why that window, and ok false with a reason when the organ was not found or there is no result yet.",
+      inputSchema: {
+        type: "object",
+        properties: { target: { type: "string", description: "A scored organ such as 'Pancreas', or a finding" } },
+        required: ["target"],
+      },
+      execute: ({ target }) => ctx.setViewFor(target),
+    },
+    {
+      name: "set_light",
+      description:
+        "Change how the CT is drawn: gamma, invert and colour map (the mask keeps its colours). Give at least one field. reset goes back to the soft tissue window, " +
+        "gamma 1, no invert and gray before the other fields apply. Colour maps are a spotting aid, not the reading standard.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          gamma: { type: "number", minimum: 0.2, maximum: 3, description: "1 is linear; above 1 brightens mid-greys" },
+          invert: { type: "boolean" },
+          colormap: { type: "string", enum: COLORMAPS },
+          reset: { type: "boolean" },
+        },
+      },
+      execute: (input = {}) => ctx.setLight(input),
     },
     {
       name: "set_threshold",

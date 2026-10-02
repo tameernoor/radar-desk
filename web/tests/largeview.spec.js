@@ -115,24 +115,25 @@ test("large view: focus mode, light panel, zoom and pan", async ({ page }) => {
   now = await vs();
   expect(now.window_preset).toBe("custom");
   expect(now.window_hu.width).toBe(width);
-  expect(now.window_hu.level).toBe(40);
+  expect(now.window_hu.level).toBe(50);
   expect(await cal()).toEqual([now.window_hu.min, now.window_hu.max]);
   await expect(page.locator("#ww-value")).toHaveText(String(width));
-  await expect(page.locator("#window-range")).toHaveText(`${now.window_hu.min} to ${now.window_hu.max} HU`);
+  await expect(page.locator("#window-range")).toHaveText(`Custom, ${now.window_hu.min} to ${now.window_hu.max} HU`);
   await expect(page.locator("[data-window][aria-pressed=true]")).toHaveCount(0);
 
-  // The panel's Liver preset moves the sliders; both preset groups show it.
-  await page.locator("#light-panel [data-window=liver]").click();
-  await expect(page.locator("#ww-value")).toHaveText("180");
-  await expect(page.locator("#wl-value")).toHaveText("70");
-  await expect(page.locator("#ww")).toHaveValue(String(sliderFromWidth(180)));
-  await expect(page.locator("#wl")).toHaveValue("70");
-  await expect(page.locator("[data-window=liver][aria-pressed=true]")).toHaveCount(2);
-  expect(await cal()).toEqual([-20, 160]);
+  // The toolbar's Liver preset moves the panel's sliders.
+  await page.locator("#viewer-toolbar [data-window=liver]").click();
+  await expect(page.locator("#ww-value")).toHaveText("150");
+  await expect(page.locator("#wl-value")).toHaveText("30");
+  await expect(page.locator("#ww")).toHaveValue(String(sliderFromWidth(150)));
+  await expect(page.locator("#wl")).toHaveValue("30");
+  await expect(page.locator("[data-window=liver][aria-pressed=true]")).toHaveCount(1);
+  await expect(page.locator("#window-range")).toHaveText("Liver, -45 to 105 HU");
+  expect(await cal()).toEqual([-45, 105]);
 
   // The level slider and the page tool.
   await page.locator("#wl").fill("100");
-  expect((await vs()).window_hu).toEqual({ min: 10, max: 190, width: 180, level: 100 });
+  expect((await vs()).window_hu).toEqual({ min: 25, max: 175, width: 150, level: 100 });
   // Right-drag sets the window from the dragged box (NiiVue's contrast mode); the panel follows.
   const img = await page.locator("#viewer").boundingBox();
   await page.mouse.move(img.x + img.width * 0.3, img.y + img.height * 0.3);
@@ -147,9 +148,9 @@ test("large view: focus mode, light panel, zoom and pan", async ({ page }) => {
   expect(hi).toBeCloseTo(now.window_hu.max, 0);
   await expect(page.locator("#ww-value")).toHaveText(String(now.window_hu.width));
   await expect(page.locator("#wl-value")).toHaveText(String(now.window_hu.level));
-  const wl = await callTool(page, "set_window_level", { width: 400, level: 40 });
-  expect(wl).toEqual({ ok: true, window_preset: "soft_tissue", window_hu: { min: -160, max: 240, width: 400, level: 40 } });
-  await expect(page.locator("#wl")).toHaveValue("40");
+  const wl = await callTool(page, "set_window_level", { width: 400, level: 50 });
+  expect(wl).toEqual({ ok: true, window_preset: "soft_tissue", window_hu: { min: -150, max: 250, width: 400, level: 50 } });
+  await expect(page.locator("#wl")).toHaveValue("50");
 
   // Zoom by key, button, ctrl+wheel and page tool; Reset view returns to 1. The crosshair stays.
   const crosshair = () => page.evaluate(() => Array.from(window.__radar.viewer.nv.scene.crosshairPos));
@@ -211,7 +212,7 @@ test("large view: focus mode, light panel, zoom and pan", async ({ page }) => {
   now = await vs();
   expect([now.gamma, now.invert, now.colormap, now.outline, now.mask_on]).toEqual([1.5, true, "hot", true, false]);
   expect(await page.evaluate(() => [window.__radar.viewer.nv.volumes[0].colormap, window.__radar.viewer.nv.volumes[0].colormapInvert])).toEqual(["hot", true]);
-  expect(await cal()).toEqual([-160, 240]); // the colour map change kept the window
+  expect(await cal()).toEqual([-150, 250]); // the colour map change kept the window
   await expect(page.locator("#mask-toggle")).toHaveAttribute("aria-pressed", "false");
   await expect(page.locator("#outline-toggle")).toHaveAttribute("aria-pressed", "true");
   await shot(page, "largeview-focus.png");
@@ -223,7 +224,7 @@ test("large view: focus mode, light panel, zoom and pan", async ({ page }) => {
   ]);
   await expect(page.locator("#colormap")).toHaveValue("gray");
   await expect(page.locator("#invert")).toHaveAttribute("aria-pressed", "false");
-  expect(await cal()).toEqual([-160, 240]);
+  expect(await cal()).toEqual([-150, 250]);
   expect(await sceneGamma()).toBe(1);
   await page.locator("#view-reset").click();
 

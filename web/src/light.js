@@ -1,10 +1,15 @@
 // CT light (window, gamma, invert, colour map) and zoom maths. Pure: no DOM, no NiiVue.
 
+// Window presets as min and max in HU. Widths and levels from Radiopaedia, "Windowing (CT)",
+// https://radiopaedia.org/articles/windowing-ct (last revised 7 Jan 2025, read 2026-10-03):
+// abdomen soft tissues W 400 L 50, liver W 150 L 30, vascular W 600 L 200, spine bone W 1800 L 400,
+// lungs W 1500 L -600. The viewing recipes (recipes.js, VIEW_RECIPES in the chat prompt) use these.
 export const WINDOWS = {
-  soft_tissue: { label: "Soft tissue", min: -160, max: 240 },
-  liver: { label: "Liver", min: -20, max: 160 },
-  bone: { label: "Bone", min: -450, max: 1050 },
+  soft_tissue: { label: "Soft tissue", min: -150, max: 250 },
+  liver: { label: "Liver", min: -45, max: 105 },
+  bone: { label: "Bone", min: -500, max: 1300 },
   lung: { label: "Lung", min: -1350, max: 150 },
+  angio: { label: "Angio", min: -100, max: 500 },
 };
 
 export const COLORMAPS = ["gray", "inferno", "viridis", "hot"];
