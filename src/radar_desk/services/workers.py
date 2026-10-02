@@ -134,8 +134,13 @@ class WorkerService:
                 scan = self.db.get_scan(job.scan_id)
                 if scan is not None and scan.state == "ready":
                     # A queued job owns no live artefacts; drop what an earlier attempt left half uploaded.
-                    for key in artefact_keys(job.id).values():
-                        self.storage.delete(key)
+                    # If storage fails here, hand the job back to the queue, so it is never claimed by nobody.
+                    try:
+                        for key in artefact_keys(job.id).values():
+                            self.storage.delete(key)
+                    except Exception:
+                        self.db.transition(job, "queued", queued_at=iso_at(now))
+                        raise
                     break
                 self.db.transition(job, "failed", finished_at=iso_at(now), error=JobError(
                     klass="input_error", message="the scan is gone or not ready"))

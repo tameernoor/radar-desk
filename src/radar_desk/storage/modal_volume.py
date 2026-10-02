@@ -126,7 +126,13 @@ class ModalVolumeStorage:
         self._upload(key, str(path))
 
     def delete(self, key: str) -> None:
+        """Deleting a missing object is fine. Modal 1.6 reports it as InvalidError("No such file or directory.")."""
+        from modal.exception import InvalidError
+
         try:
             self._vol().remove_file(self._path(key))
         except FileNotFoundError:
             pass
+        except InvalidError as err:
+            if "no such file" not in str(err).lower():
+                raise

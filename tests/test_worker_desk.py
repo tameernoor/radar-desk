@@ -214,6 +214,20 @@ def test_claim_takes_the_oldest_unheld_job_and_fails_a_missing_scan(desk):
     assert desk.svc.db.get_job(held).state == "queued"
 
 
+def test_claim_puts_the_job_back_when_clearing_old_artefacts_fails(desk, monkeypatch):
+    job_id = desk.queue()
+
+    def broken_delete(key):
+        raise RuntimeError("storage is down")
+
+    monkeypatch.setattr(desk.svc.workers.storage, "delete", broken_delete)
+    with pytest.raises(RuntimeError):
+        desk.worker.post("/worker/claim", json={"worker": INFO})
+    assert desk.svc.db.get_job(job_id).state == "queued"
+    monkeypatch.undo()
+    assert desk.claim()["job_id"] == job_id
+
+
 def test_claim_needs_the_worker_backend(make_desk):
     desk = make_desk()
     desk.svc.settings = desk.svc.settings.model_copy(update={"gpu_backend": "fake"})

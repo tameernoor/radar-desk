@@ -290,6 +290,17 @@ def test_volume_put_file_and_delete(mv, vol, tmp_path: Path):
     mv.delete(KEY)  # deleting a missing object is fine
 
 
+def test_volume_delete_reraises_other_invalid_errors(mv, vol, monkeypatch):
+    from modal.exception import InvalidError
+
+    def boom(path, recursive=False):
+        raise InvalidError("Volume is read-only")
+
+    monkeypatch.setattr(vol, "remove_file", boom)
+    with pytest.raises(InvalidError):
+        mv.delete(KEY)
+
+
 def test_volume_put_file_streams_from_disk(tmp_path: Path):
     import tracemalloc
 
