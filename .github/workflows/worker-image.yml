@@ -1,7 +1,8 @@
 name: worker image
 
-# Every build: :latest and :<commit sha>. A tag worker-vX.Y also publishes :X.Y, the version pods pin
-# through WORKER_IMAGE. :0.1 is the first image (commit 28b3c8d) and is no longer overwritten.
+# Every build publishes :<commit sha>; builds from main also move :latest. A tag worker-vX.Y also
+# publishes :X.Y, the version pods pin through WORKER_IMAGE. :0.1 is the first image (commit 28b3c8d);
+# never tag worker-v0.1, it would overwrite it.
 on:
   workflow_dispatch:
   push:
@@ -17,7 +18,7 @@ permissions:
   packages: write
 
 concurrency:
-  group: worker-image
+  group: worker-image-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -42,7 +43,7 @@ jobs:
           image=ghcr.io/${{ github.repository_owner }}/radar-worker
           {
             echo "list<<EOF"
-            echo "$image:latest"
+            if [[ "$GITHUB_REF" == refs/heads/main ]]; then echo "$image:latest"; fi
             echo "$image:${{ github.sha }}"
             if [[ "$GITHUB_REF" == refs/tags/worker-v* ]]; then echo "$image:${GITHUB_REF#refs/tags/worker-v}"; fi
             echo "EOF"
