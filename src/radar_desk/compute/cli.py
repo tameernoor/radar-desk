@@ -42,6 +42,10 @@ def compute_lines(c: dict) -> list[str]:
     fixed = "" if c["changeable"] else ", fixed at start-up"
     url = f", {c['public_url']}" if c.get("public_url") else ""
     lines = [f"compute: mode {c['mode']}{fixed}, tunnel {c['tunnel_mode']}{url}"]
+    runpod = c.get("runpod") or {}
+    if isinstance(runpod.get("gpus"), list) and runpod["gpus"]:
+        where = f" in {runpod['datacenter']}" if runpod.get("datacenter") else ""
+        lines.append(f"gpus: {', '.join(runpod['gpus'])}{where}")
     pod = c.get("pod")
     if pod:
         cost = "?" if pod.get("cost_per_hr") is None else f"{pod['cost_per_hr']:.3f}"

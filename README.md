@@ -47,7 +47,7 @@ Open http://127.0.0.1:8000 and log in with your `OWNER_TOKEN`. With `GPU_BACKEND
 
 Any NVIDIA machine can score instead of Modal. Set `GPU_BACKEND=worker`, create a worker token on the jobs page, build `worker/docker/Dockerfile` and run `docker run --gpus all -v /workspace:/workspace -e RADAR_DESK_URL=<app url> -e RADAR_WORKER_TOKEN=<token> radar-worker`; the weights are fetched to `/workspace/radar-weights` on first start.
 
-The Compute choice at the top of the jobs page moves scoring between Modal and RunPod without a restart. On RunPod the app starts one pod when a job is queued and deletes it when idle; it needs `WORKER_IMAGE` and the `RUNPOD_*` keys from `.env.example`.
+The Compute choice at the top of the jobs page moves scoring between Modal and RunPod without a restart. On RunPod the app starts one pod when a job is queued and deletes it when idle; it needs `WORKER_IMAGE` and the `RUNPOD_*` keys from `.env.example`. `RUNPOD_GPUS` sets which GPU types to try, in order.
 
 The pod reaches the app through `WORKER_PUBLIC_URL`, which the app only checks, or, when that is unset, through a Cloudflare quick tunnel the app starts and stops itself. `uv run python -m radar_desk.compute runpod [--start]|modal|stop|status` does the same from a terminal.
 
