@@ -2,6 +2,7 @@
 // setColormapLabel, onLocationChange) are wrapped here so an upgrade touches one file.
 import { Niivue } from "@niivue/niivue";
 import { organRgb, UNSCORED_GREY } from "./palette.js";
+import { countSlice, invert4, mmToVoxel, nearestLabelled, organsOnSlice, planeAxis, voxelIndex, voxelSpacing } from "./slice.js";
 
 export const WINDOWS = {
   soft_tissue: { label: "Soft tissue", min: -160, max: 240 },
@@ -20,7 +21,10 @@ const DTYPE_BYTES = { uint8: 1, int8: 1, int16: 2, uint16: 2, int32: 4, uint32: 
 //   programmatic jump (refreshLocation).
 // - fillBox and labelsPresent read and write volume.img directly, in the file's
 //   native voxel order, indexed with hdr.dims and hdr.affine (not NiiVue's RAS order).
-// - jumpToMm writes nv.scene.crosshairPos (1.0 renames this to setCrosshairPos).
+// - jumpToMm writes nv.scene.crosshairPos (1.0 renames this to setCrosshairPos), and
+//   sliceState reads it back through frac2mm to find the slice on screen.
+// - sliceState reads the CT value with NVImage.mm2vox and getValue, as NiiVue's own
+//   location string does.
 
 function mmToFrac(nv, mm) {
   return nv.mm2frac([mm[0], mm[1], mm[2]]);
@@ -50,34 +54,6 @@ export function rawBytes(scan) {
 }
 
 export const tooBig = (scan) => rawBytes(scan) > MAX_RAW_BYTES;
-
-function invert4(m) {
-  // General 4x4 inverse (row-major nested arrays).
-  const a = m.flat();
-  const inv = new Array(16);
-  inv[0] = a[5] * a[10] * a[15] - a[5] * a[11] * a[14] - a[9] * a[6] * a[15] + a[9] * a[7] * a[14] + a[13] * a[6] * a[11] - a[13] * a[7] * a[10];
-  inv[4] = -a[4] * a[10] * a[15] + a[4] * a[11] * a[14] + a[8] * a[6] * a[15] - a[8] * a[7] * a[14] - a[12] * a[6] * a[11] + a[12] * a[7] * a[10];
-  inv[8] = a[4] * a[9] * a[15] - a[4] * a[11] * a[13] - a[8] * a[5] * a[15] + a[8] * a[7] * a[13] + a[12] * a[5] * a[11] - a[12] * a[7] * a[9];
-  inv[12] = -a[4] * a[9] * a[14] + a[4] * a[10] * a[13] + a[8] * a[5] * a[14] - a[8] * a[6] * a[13] - a[12] * a[5] * a[10] + a[12] * a[6] * a[9];
-  inv[1] = -a[1] * a[10] * a[15] + a[1] * a[11] * a[14] + a[9] * a[2] * a[15] - a[9] * a[3] * a[14] - a[13] * a[2] * a[11] + a[13] * a[3] * a[10];
-  inv[5] = a[0] * a[10] * a[15] - a[0] * a[11] * a[14] - a[8] * a[2] * a[15] + a[8] * a[3] * a[14] + a[12] * a[2] * a[11] - a[12] * a[3] * a[10];
-  inv[9] = -a[0] * a[9] * a[15] + a[0] * a[11] * a[13] + a[8] * a[1] * a[15] - a[8] * a[3] * a[13] - a[12] * a[1] * a[11] + a[12] * a[3] * a[9];
-  inv[13] = a[0] * a[9] * a[14] - a[0] * a[10] * a[13] - a[8] * a[1] * a[14] + a[8] * a[2] * a[13] + a[12] * a[1] * a[10] - a[12] * a[2] * a[9];
-  inv[2] = a[1] * a[6] * a[15] - a[1] * a[7] * a[14] - a[5] * a[2] * a[15] + a[5] * a[3] * a[14] + a[13] * a[2] * a[7] - a[13] * a[3] * a[6];
-  inv[6] = -a[0] * a[6] * a[15] + a[0] * a[7] * a[14] + a[4] * a[2] * a[15] - a[4] * a[3] * a[14] - a[12] * a[2] * a[7] + a[12] * a[3] * a[6];
-  inv[10] = a[0] * a[5] * a[15] - a[0] * a[7] * a[13] - a[4] * a[1] * a[15] + a[4] * a[3] * a[13] + a[12] * a[1] * a[7] - a[12] * a[3] * a[5];
-  inv[14] = -a[0] * a[5] * a[14] + a[0] * a[6] * a[13] + a[4] * a[1] * a[14] - a[4] * a[2] * a[13] - a[12] * a[1] * a[6] + a[12] * a[2] * a[5];
-  inv[3] = -a[1] * a[6] * a[11] + a[1] * a[7] * a[10] + a[5] * a[2] * a[11] - a[5] * a[3] * a[10] - a[9] * a[2] * a[7] + a[9] * a[3] * a[6];
-  inv[7] = a[0] * a[6] * a[11] - a[0] * a[7] * a[10] - a[4] * a[2] * a[11] + a[4] * a[3] * a[10] + a[8] * a[2] * a[7] - a[8] * a[3] * a[6];
-  inv[11] = -a[0] * a[5] * a[11] + a[0] * a[7] * a[9] + a[4] * a[1] * a[11] - a[4] * a[3] * a[9] - a[8] * a[1] * a[7] + a[8] * a[3] * a[5];
-  inv[15] = a[0] * a[5] * a[10] - a[0] * a[6] * a[9] - a[4] * a[1] * a[10] + a[4] * a[2] * a[9] + a[8] * a[1] * a[6] - a[8] * a[2] * a[5];
-  const det = a[0] * inv[0] + a[1] * inv[4] + a[2] * inv[8] + a[3] * inv[12];
-  return [0, 1, 2, 3].map((r) => [0, 1, 2, 3].map((c) => inv[r * 4 + c] / det));
-}
-
-function mmToVoxel(inv, mm) {
-  return [0, 1, 2].map((r) => inv[r][0] * mm[0] + inv[r][1] * mm[1] + inv[r][2] * mm[2] + inv[r][3]);
-}
 
 // ---------- viewer ----------
 
@@ -158,6 +134,55 @@ export function createViewer(canvas, { onLocation, onWindow } = {}) {
 
   function refreshLocation() {
     if (typeof nv.createOnLocationChange === "function") nv.createOnLocationChange();
+  }
+
+  // Organ names as the rest of the UI uses them; unscored labels get their catalog name, capitalised.
+  function nameOfLabel(label) {
+    if (label === 0) return "background";
+    const organ = state.organByLabel.get(label);
+    if (organ) return organ;
+    const en = state.labels.find((l) => l.label === label)?.en;
+    return en ? en[0].toUpperCase() + en.slice(1) : String(label);
+  }
+
+  // What is on screen, computed only when asked (get_view_state), never on scroll.
+  function sliceState() {
+    const empty = { plane: state.slice, slice: null, organs_on_slice: null, crosshair: null, nearest_organ: null };
+    if (!state.ct) return empty;
+    const mm = fracToMm(nv, nv.scene.crosshairPos);
+    const vox = state.ct.mm2vox(mm);
+    const hu = state.ct.getValue(vox[0], vox[1], vox[2]);
+    const crosshair = { mm: mm.map((v) => Math.round(v * 10) / 10), hu: Number.isFinite(hu) ? Math.round(hu) : null, label: null, organ: null };
+    const mask = state.mask;
+    if (!mask?.img || !mask.hdr?.affine) return { ...empty, crosshair };
+
+    // Multiplanar and 3D report the axial slice through the crosshair.
+    const plane = ["coronal", "sagittal"].includes(state.slice) ? state.slice : "axial";
+    const dims = [mask.hdr.dims[1], mask.hdr.dims[2], mask.hdr.dims[3]];
+    const axis = planeAxis(mask.hdr.affine, plane);
+    const voxel = mmToVoxel(invert4(mask.hdr.affine), mm);
+    // Clamp as fillBox does: at a crosshair fraction of exactly 1 the rounded voxel equals n.
+    const clamp = (v, n) => Math.max(0, Math.min(n - 1, Math.round(v)));
+    const index = clamp(voxel[axis], dims[axis]);
+    const inside = voxel.every((v, i) => Math.round(v) >= 0 && Math.round(v) < dims[i]);
+    const label = inside ? mask.img[voxelIndex(dims, ...voxel.map((v, i) => clamp(v, dims[i])))] : 0;
+    crosshair.label = label;
+    crosshair.organ = label ? nameOfLabel(label) : null;
+
+    const counts = countSlice(mask.img, dims, axis, index);
+    const isScored = (l) => state.organByLabel.has(l);
+    let nearest = null;
+    if (!label) {
+      const hit = nearestLabelled(mask.img, dims, axis, index, voxel, voxelSpacing(mask.hdr.affine));
+      if (hit) nearest = { organ: nameOfLabel(hit.label), label: hit.label, distance_mm: hit.distance_mm };
+    }
+    return {
+      plane: state.slice,
+      slice: { axis: plane, index, number: index + 1, count: dims[axis] },
+      organs_on_slice: organsOnSlice(counts, nameOfLabel, isScored),
+      crosshair,
+      nearest_organ: nearest,
+    };
   }
 
   const api = {
@@ -278,12 +303,7 @@ export function createViewer(canvas, { onLocation, onWindow } = {}) {
     },
 
     location() {
-      const labelName =
-        state.labelValue == null
-          ? null
-          : state.labelValue === 0
-            ? "background"
-            : state.organByLabel.get(state.labelValue) || state.labels.find((l) => l.label === state.labelValue)?.en || String(state.labelValue);
+      const labelName = state.labelValue == null ? null : nameOfLabel(state.labelValue);
       return {
         crosshair_mm: state.crosshairMm ? state.crosshairMm.map((v) => Math.round(v * 10) / 10) : null,
         hu: state.hu == null ? null : Math.round(state.hu),
@@ -293,6 +313,19 @@ export function createViewer(canvas, { onLocation, onWindow } = {}) {
       };
     },
 
+    // The slice on screen and what RADAR outlined on it. Walks one mask slice, so it runs only
+    // for get_view_state and the look card, never for key presses or on scroll.
+    sliceState() {
+      const view = sliceState();
+      const c = view.crosshair;
+      // The flat fields follow the same fresh reading, so a scroll without a click cannot leave them stale.
+      const fresh = c
+        ? { crosshair_mm: c.mm, hu: c.hu, ...(c.label == null ? {} : { label: c.label, label_name: nameOfLabel(c.label), organ: state.organByLabel.get(c.label) || null }) }
+        : {};
+      return { ...fresh, ...view };
+    },
+
+    // Cheap: toggles and settings plus the last crosshair reading.
     state() {
       return {
         window_preset: state.window,
@@ -326,7 +359,8 @@ function fillBox(volume, boxMm) {
   const [i0, i1] = range(0, nx);
   const [j0, j1] = range(1, ny);
   const [k0, k1] = range(2, nz);
-  const set = (i, j, k) => (img[i + j * nx + k * nx * ny] = 1);
+  const dims = [nx, ny, nz];
+  const set = (i, j, k) => (img[voxelIndex(dims, i, j, k)] = 1);
   for (let k = k0; k <= k1; k++)
     for (let j = j0; j <= j1; j++) {
       set(i0, j, k);
