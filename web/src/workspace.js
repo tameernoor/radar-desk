@@ -125,10 +125,20 @@ function setWindow(preset) {
   return { ok: true, window_preset: preset, hu_range: [WINDOWS[preset].min, WINDOWS[preset].max] };
 }
 
+// Multiplanar toggles; a plane button in multiplanar picks the main view.
 function setSlice(name) {
-  ws.viewer.setSliceType(name);
+  if (name === "multiplanar" && ws.viewer.state().slice_type === "multiplanar") ws.viewer.exitMultiplanar();
+  else ws.viewer.setSliceType(name);
+}
+
+// Called by the viewer after any view change, including a swap from a reference tile.
+function onViewChange() {
+  const { slice_type: type, main_plane: main } = ws.viewer.state();
+  for (const b of document.querySelectorAll("[data-slice]")) {
+    const on = b.dataset.slice === type || (type === "multiplanar" && b.dataset.slice === main);
+    b.setAttribute("aria-pressed", String(on));
+  }
   closeStaleCard();
-  for (const b of document.querySelectorAll("[data-slice]")) b.setAttribute("aria-pressed", String(b.dataset.slice === name));
 }
 
 function setThreshold(percent) {
@@ -423,9 +433,9 @@ function hideLookCard({ refocus = true } = {}) {
 // displayed plane's normal (NiiVue's RAS order: x, y, z). Cheap, no pass over the mask.
 let lookSlice = null;
 function sliceKey() {
-  const type = ws.viewer.state().slice_type;
-  const axis = { sagittal: 0, coronal: 1 }[type] ?? 2;
-  return `${type}:${ws.viewer.nv.scene.crosshairPos[axis]}`;
+  const { slice_type: type, main_plane: main } = ws.viewer.state();
+  const axis = { sagittal: 0, coronal: 1 }[main] ?? 2;
+  return `${type}:${main}:${ws.viewer.nv.scene.crosshairPos[axis]}`;
 }
 
 // A card about another slice would be stale, so it closes; w reopens it.
@@ -493,7 +503,7 @@ function wireKeys() {
     else if (WINDOW_KEYS[k]) setWindow(WINDOW_KEYS[k]);
     else if (k === "[") setThreshold(ws.findings.state.threshold - 5);
     else if (k === "]") setThreshold(ws.findings.state.threshold + 5);
-    else if (k === "m") setSlice(ws.viewer.state().slice_type === "multiplanar" ? "axial" : "multiplanar");
+    else if (k === "m") setSlice("multiplanar");
     else if (k === "w") showLookCard();
     else if (k === "Escape" && !$("look-card").hidden) hideLookCard();
     else return;
@@ -530,6 +540,7 @@ async function main() {
       closeStaleCard();
     },
     onWindow: markWindow,
+    onView: onViewChange,
   });
 
   renderScanBar(scan);

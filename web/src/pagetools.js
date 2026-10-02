@@ -22,7 +22,8 @@ function definitions(ctx) {
       name: "get_view_state",
       description:
         "Call this first for questions like 'what am I looking at?'. Returns the plane on screen and the slice as {axis, index, number, count}; " +
-        "index counts from 0, so tell the user slice number of count. In multiplanar and 3D views the slice is the axial one through the crosshair. " +
+        "index counts from 0, so tell the user slice number of count. In multiplanar the plane and slice are the main (large) view's, main_plane names it and " +
+        "reference_planes lists the two small views; the user can click a reference view to make it the main one. In the 3D view the slice is the axial one through the crosshair. " +
         "Also returns " +
         "the organs RADAR outlined on that slice with their share of the outlined pixels (largest first, and whether each is one of the 18 scored organs), " +
         "what is under the crosshair (mm, HU, mask label and organ), and the nearest outlined organ with its in-plane distance when the crosshair is on background. " +

@@ -2,6 +2,7 @@
 // setColormapLabel, onLocationChange) are wrapped here so an upgrade touches one file.
 import { Niivue } from "@niivue/niivue";
 import { organRgb, UNSCORED_GREY } from "./palette.js";
+import { multiplanarLayout, PLANES, referencePlanes, routeEvent } from "./views.js";
 import { countSlice, invert4, mmToVoxel, nearestLabelled, organsOnSlice, planeAxis, voxelIndex, voxelSpacing } from "./slice.js";
 
 export const WINDOWS = {
@@ -25,6 +26,17 @@ const DTYPE_BYTES = { uint8: 1, int8: 1, int16: 2, uint16: 2, int32: 4, uint32: 
 //   sliceState reads it back through frac2mm to find the slice on screen.
 // - sliceState reads the CT value with NVImage.mm2vox and getValue, as NiiVue's own
 //   location string does.
+// - Multiplanar uses the public setCustomLayout, clearCustomLayout and getCustomLayout
+//   (src/niivue/index.ts 3145, 3165, 3174).
+// - Pointer routing (the capture listener in createViewer) relies on
+//   - tileIndex(x, y), index.ts 7809, @internal, which tests screenSlices[i].leftTopWidthHeight;
+//   - screenSlices, index.ts 344, an undocumented public field, and its axCorSag
+//     (SLICE_TYPE values in src/nvdocument.ts 40);
+//   - uiData.dpr, index.ts 301, set at 698-702 and again on resize at 1212;
+//   - canvas pixels computed like NiiVue's own handlers, CSS offset from the canvas's top left
+//     (src/niivue/interaction/EventController.ts 58-87) times uiData.dpr (index.ts 1271, 1285);
+//   - NiiVue registering its pointer listeners on the canvas in the bubbling phase
+//     (index.ts 2538-2560), so a capture listener on the canvas's parent runs first.
 
 function mmToFrac(nv, mm) {
   return nv.mm2frac([mm[0], mm[1], mm[2]]);
@@ -57,7 +69,7 @@ export const tooBig = (scan) => rawBytes(scan) > MAX_RAW_BYTES;
 
 // ---------- viewer ----------
 
-export function createViewer(canvas, { onLocation, onWindow } = {}) {
+export function createViewer(canvas, { onLocation, onWindow, onView } = {}) {
   const nv = new Niivue({
     backColor: [0, 0, 0, 1],
     crosshairColor: [1, 0.85, 0.2, 0.9],
@@ -83,7 +95,9 @@ export function createViewer(canvas, { onLocation, onWindow } = {}) {
     opacity: 0.45,
     outline: false,
     window: "soft_tissue",
-    slice: "axial",
+    slice: "axial", // view type: axial, coronal, sagittal, multiplanar or render
+    mainPlane: "axial", // in multiplanar, the big view; the other two planes are references
+    layoutWide: null,
     crosshairMm: null,
     hu: null,
     labelValue: null,
@@ -145,9 +159,102 @@ export function createViewer(canvas, { onLocation, onWindow } = {}) {
     return en ? en[0].toUpperCase() + en.slice(1) : String(label);
   }
 
+  // The plane of the main view: the single plane, the multiplanar main, or axial for 3D.
+  function mainPlaneOf() {
+    if (state.slice === "multiplanar") return state.mainPlane;
+    return PLANES.includes(state.slice) ? state.slice : "axial";
+  }
+
+  // What get_view_state calls plane: the main plane in multiplanar, otherwise the view type.
+  function displayedPlane() {
+    return state.slice === "multiplanar" ? state.mainPlane : state.slice;
+  }
+
+  const SLICE_TYPES = () => ({
+    axial: nv.sliceTypeAxial,
+    coronal: nv.sliceTypeCoronal,
+    sagittal: nv.sliceTypeSagittal,
+    multiplanar: nv.sliceTypeMultiplanar,
+    render: nv.sliceTypeRender,
+  });
+  const planeOfSliceType = (t) => PLANES.find((p) => SLICE_TYPES()[p] === t) ?? null;
+
+  // Main view plus two references, sized for the wrapper's shape.
+  function applyLayout(force = false) {
+    if (state.slice !== "multiplanar") return;
+    const box = canvas.parentElement.getBoundingClientRect();
+    const wide = box.width >= box.height;
+    if (!force && wide === state.layoutWide) return;
+    state.layoutWide = wide;
+    const types = SLICE_TYPES();
+    nv.setCustomLayout(multiplanarLayout(state.mainPlane, box.width, box.height).map((t) => ({ sliceType: types[t.plane], position: t.position })));
+  }
+
+  new ResizeObserver(() => applyLayout()).observe(canvas.parentElement);
+
+  // Pointer routing in multiplanar. NiiVue's listeners sit on the canvas in the bubbling phase
+  // and are private, so they cannot be wrapped or removed. A capture-phase listener on an
+  // ancestor runs before them for every event aimed at the canvas, and stopping the event there
+  // means NiiVue never sees it. The internals it reads are listed at the top of this file.
+  function tileAt(e) {
+    const point = e.touches?.[0] || e.changedTouches?.[0] || e;
+    const rect = canvas.getBoundingClientRect();
+    // Same canvas pixels NiiVue uses: CSS offset from the canvas's top left times uiData.dpr.
+    const dpr = nv.uiData.dpr || 1;
+    const index = nv.tileIndex((point.clientX - rect.left) * dpr, (point.clientY - rect.top) * dpr);
+    const plane = index >= 0 ? planeOfSliceType(nv.screenSlices[index].axCorSag) : null;
+    return { index, plane, x: point.clientX, y: point.clientY };
+  }
+
+  let press = null; // where the last press began, kept until the next one: {index, x, y, onMain}
+  function route(e) {
+    if (e.target !== canvas || state.slice !== "multiplanar") return;
+    const tile = tileAt(e);
+    const type = e.type;
+    if (type === "mousedown" || type === "touchstart") press = { index: tile.index, x: tile.x, y: tile.y, onMain: tile.plane === state.mainPlane };
+    let eventType = type;
+    if (type === "click") {
+      // e.detail > 1 is the second click of a double click, which would swap straight back.
+      const plain = e.detail <= 1 && press && press.index === tile.index && Math.hypot(tile.x - press.x, tile.y - press.y) < 4;
+      if (!plain) return;
+    }
+    const action = routeEvent({
+      mode: state.slice,
+      mainPlane: state.mainPlane,
+      tilePlane: tile.plane,
+      tileIndex: tile.index,
+      eventType,
+      button: e.button ?? 0,
+      pressStartedOnMain: Boolean(press?.onMain),
+    });
+    if (action === "pass") return;
+    e.stopPropagation();
+    if (type === "wheel" || type === "contextmenu") e.preventDefault();
+    if (action === "swap") api.setMainPlane(tile.plane);
+  }
+  for (const type of ["mousedown", "mouseup", "click", "dblclick", "wheel", "contextmenu", "touchstart", "touchmove", "touchend"]) {
+    canvas.parentElement.addEventListener(type, route, { capture: true, passive: false });
+  }
+
+  // Switch the view type. Entering multiplanar keeps the single plane as the main view.
+  function showView(name) {
+    const types = SLICE_TYPES();
+    if (name === "multiplanar" && PLANES.includes(state.slice)) state.mainPlane = state.slice;
+    state.slice = name;
+    if (name === "multiplanar") {
+      nv.setSliceType(types.multiplanar);
+      applyLayout(true);
+    } else {
+      if (nv.getCustomLayout()) nv.clearCustomLayout();
+      state.layoutWide = null;
+      nv.setSliceType(types[name]);
+    }
+    onView?.();
+  }
+
   // What is on screen, computed only when asked (get_view_state), never on scroll.
   function sliceState() {
-    const empty = { plane: state.slice, slice: null, organs_on_slice: null, crosshair: null, nearest_organ: null };
+    const empty = { plane: displayedPlane(), slice: null, organs_on_slice: null, crosshair: null, nearest_organ: null };
     if (!state.ct) return empty;
     const mm = fracToMm(nv, nv.scene.crosshairPos);
     const vox = state.ct.mm2vox(mm);
@@ -156,8 +263,8 @@ export function createViewer(canvas, { onLocation, onWindow } = {}) {
     const mask = state.mask;
     if (!mask?.img || !mask.hdr?.affine) return { ...empty, crosshair };
 
-    // Multiplanar and 3D report the axial slice through the crosshair.
-    const plane = ["coronal", "sagittal"].includes(state.slice) ? state.slice : "axial";
+    // Counted on the main view's plane; 3D has no slice plane, so it reports the axial one.
+    const plane = mainPlaneOf();
     const dims = [mask.hdr.dims[1], mask.hdr.dims[2], mask.hdr.dims[3]];
     const axis = planeAxis(mask.hdr.affine, plane);
     const voxel = mmToVoxel(invert4(mask.hdr.affine), mm);
@@ -177,7 +284,7 @@ export function createViewer(canvas, { onLocation, onWindow } = {}) {
       if (hit) nearest = { organ: nameOfLabel(hit.label), label: hit.label, distance_mm: hit.distance_mm };
     }
     return {
-      plane: state.slice,
+      plane: displayedPlane(),
       slice: { axis: plane, index, number: index + 1, count: dims[axis] },
       organs_on_slice: organsOnSlice(counts, nameOfLabel, isScored),
       crosshair,
@@ -237,18 +344,27 @@ export function createViewer(canvas, { onLocation, onWindow } = {}) {
       nv.updateGLVolume();
     },
 
+    // A plane while in multiplanar picks the main view; otherwise it is the single view.
     setSliceType(name) {
-      const types = {
-        axial: nv.sliceTypeAxial,
-        coronal: nv.sliceTypeCoronal,
-        sagittal: nv.sliceTypeSagittal,
-        multiplanar: nv.sliceTypeMultiplanar,
-        render: nv.sliceTypeRender,
-      };
+      const types = SLICE_TYPES();
       if (!(name in types)) throw new Error(`Unknown view: ${name}`);
-      state.slice = name;
-      nv.setSliceType(types[name]);
+      if (state.slice === "multiplanar" && PLANES.includes(name)) return api.setMainPlane(name);
+      showView(name);
     },
+
+    // Swap the main view; the crosshair is left where it is.
+    setMainPlane(plane) {
+      if (!PLANES.includes(plane)) throw new Error(`Unknown plane: ${plane}`);
+      state.mainPlane = plane;
+      applyLayout(true);
+      onView?.();
+    },
+
+    // Back to a single view of the main plane.
+    exitMultiplanar() {
+      if (state.slice === "multiplanar") showView(state.mainPlane);
+    },
+
 
     jumpToMm(mm) {
       if (!state.ct) return;
@@ -330,6 +446,8 @@ export function createViewer(canvas, { onLocation, onWindow } = {}) {
       return {
         window_preset: state.window,
         slice_type: state.slice,
+        main_plane: state.slice === "render" ? null : mainPlaneOf(),
+        reference_planes: state.slice === "multiplanar" ? referencePlanes(state.mainPlane) : [],
         mask_loaded: Boolean(state.mask),
         mask_on: state.maskOn,
         mask_opacity: state.opacity,
