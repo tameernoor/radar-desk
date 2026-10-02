@@ -108,13 +108,13 @@ class CostService:
 
     def gpu_status(self, backend_name: str, now: float) -> dict:
         """The body of GET /gpu/status. `queued` is oldest first with held jobs included; the hourly
-        price is that of the GPU in use or first requested, null on the fake backend."""
+        price is that of the GPU in use or first requested, null on any backend but modal."""
         month = month_of(now)
         submitted = self.db.list_jobs(state="submitted", limit=100_000)
         queued = self.db.list_jobs(state="queued", limit=100_000)
         in_flight = submitted[-1] if submitted else None
         price = None
-        if backend_name != "fake":
+        if backend_name == "modal":
             gpu = (in_flight.gpu_used if in_flight else None) or next(iter(self.settings.gpu_list), None)
             price = round(price_per_s(gpu, self.settings) * 3600, 4)
         return {

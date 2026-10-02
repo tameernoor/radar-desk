@@ -45,6 +45,8 @@ uv run python -m radar_desk
 
 Open http://127.0.0.1:8000 and log in with your `OWNER_TOKEN`. With `GPU_BACKEND=fake` it runs without a GPU and makes up clearly marked results. `.env.example` explains every setting.
 
+Any NVIDIA machine can score instead of Modal. Set `GPU_BACKEND=worker`, create a worker token on the jobs page, build `worker/docker/Dockerfile` and run `docker run --gpus all -v /workspace:/workspace -e RADAR_DESK_URL=<app url> -e RADAR_WORKER_TOKEN=<token> radar-worker`; the weights are fetched to `/workspace/radar-weights` on first start.
+
 Tests are `uv run pytest` and, in `web/`, `npm test`.
 
 ## Licence

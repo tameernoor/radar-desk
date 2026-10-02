@@ -43,8 +43,12 @@ class Poller:
         """One pass: collect submitted jobs first, then spawn the oldest queued job if none is running.
 
         Jobs run one at a time. The function has max_containers=1 anyway, and a job queued behind
-        another must not start its stuck clock.
+        another must not start its stuck clock. On a pull backend the workers claim jobs themselves,
+        so the poller only runs the job desk's lease and timeout checks.
         """
+        if getattr(self.backend, "pull", False):
+            self.services.workers.tick(self.clock())
+            return
         for job in reversed(self.db.list_jobs(state="submitted", limit=ALL)):
             try:
                 self._check_submitted(job)
@@ -124,15 +128,7 @@ class Poller:
 
     def _finish(self, job: Job, state: str, now: float, timings: dict | None = None,
                 gpu_used: str | None = None, error: JobError | None = None) -> Job:
-        attempt = self.services.costs.attempt_cost(job, timings, gpu_used, now)
-        return self.db.transition(
-            job, state,
-            finished_at=iso_at(now),
-            timings=Timings(**timings) if timings else None,
-            gpu_used=gpu_used,
-            error=error,
-            cost_estimate_usd=(job.cost_estimate_usd or 0.0) + attempt,
-        )
+        return _finish(self.services, job, state, now, timings, gpu_used, error)
 
     def _check_submitted(self, job: Job) -> None:
         now = self.clock()
@@ -164,22 +160,44 @@ class Poller:
                              error=JobError(klass=type(exc).__name__, message=str(exc)))
 
     def _handle_outcome(self, job: Job, outcome: Finished | Errored, now: float) -> None:
-        if isinstance(outcome, Errored):
-            self._finish(job, "failed", now, error=JobError(klass=outcome.klass, message=outcome.message))
-            return
-        data = outcome.result
-        timings = data.get("timings") if isinstance(data.get("timings"), dict) else None
-        device = (data.get("versions") or {}).get("gpu")
-        gpu_used = gpu_type_from_device(device) or device
-        if data.get("ok") is not True:
-            err = data.get("error") or {}
-            self._finish(job, "failed", now, timings, gpu_used, JobError(
-                klass=str(err.get("class") or "input_error"), message=str(err.get("message") or "")))
-            return
-        try:
-            self.services.results.store(job, data)
-        except ServiceError as exc:
-            self._finish(job, "failed", now, timings, gpu_used,
-                         JobError(klass="invalid_result", message=exc.detail))
-            return
-        self._finish(job, "done", now, timings, gpu_used)
+        settle(self.services, job, outcome, now)
+
+
+def _finish(services: Any, job: Job, state: str, now: float, timings: dict | None = None,
+            gpu_used: str | None = None, error: JobError | None = None) -> Job:
+    """Move a submitted job to its final state. The attempt's cost is added only on a priced backend."""
+    fields: dict[str, Any] = {}
+    if getattr(services.backend, "priced", True):
+        attempt = services.costs.attempt_cost(job, timings, gpu_used, now)
+        fields["cost_estimate_usd"] = (job.cost_estimate_usd or 0.0) + attempt
+    return services.db.transition(
+        job, state,
+        finished_at=iso_at(now),
+        timings=Timings(**timings) if timings else None,
+        gpu_used=gpu_used,
+        error=error,
+        **fields,
+    )
+
+
+def settle(services: Any, job: Job, outcome: Finished | Errored, now: float) -> Job:
+    """Store a finished call's result and finish the job, or fail it with the call's error class.
+
+    Shared by the poller and the pull worker desk, so cost, timings and `gpu_used` are handled in one place.
+    """
+    if isinstance(outcome, Errored):
+        return _finish(services, job, "failed", now, error=JobError(klass=outcome.klass, message=outcome.message))
+    data = outcome.result
+    timings = data.get("timings") if isinstance(data.get("timings"), dict) else None
+    device = (data.get("versions") or {}).get("gpu")
+    gpu_used = gpu_type_from_device(device) or device
+    if data.get("ok") is not True:
+        err = data.get("error") or {}
+        return _finish(services, job, "failed", now, timings, gpu_used, JobError(
+            klass=str(err.get("class") or "input_error"), message=str(err.get("message") or "")))
+    try:
+        services.results.store(job, data)
+    except ServiceError as exc:
+        return _finish(services, job, "failed", now, timings, gpu_used,
+                       JobError(klass="invalid_result", message=exc.detail))
+    return _finish(services, job, "done", now, timings, gpu_used)

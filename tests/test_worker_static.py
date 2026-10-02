@@ -88,6 +88,22 @@ def test_infer_imports_torch_and_monai_only_inside_functions():
                 assert m.split(".")[0] not in {"torch", "monai", "inference_demo", "transformers"}, m
 
 
+@pytest.mark.parametrize("name", ["pull.py", "job.py"])
+def test_pull_and_job_import_heavy_modules_only_inside_functions(name):
+    path = WORKER / "radar_worker" / name
+    assert not any(n == "radar_desk" or n.startswith("radar_desk.") for n in _imports(path)), name
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            mods = [a.name for a in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            mods = [node.module or ""] + [f"{node.module}.{a.name}" for a in node.names]
+        else:
+            continue
+        for m in mods:
+            assert m.split(".")[0] not in {"torch", "monai"} and not m.startswith("radar_worker.infer"), (name, m)
+
+
 @pytest.fixture()
 def no_network(monkeypatch):
     def refuse(*args, **kwargs):
@@ -307,7 +323,7 @@ def test_existing_artefact_is_artefact_exists_not_input_error(modal_app, monkeyp
     from radar_worker import geometry, infer
 
     loaded = SimpleNamespace(test_items=["k1"], csv_header=lambda: ["file_name", "k1"])
-    scored = {"ok": True, "file_name": "source.nii.gz", "findings": [{"key": "k1", "prob": 0.5}],
+    scored = {"ok": True, "file_name": "source.nii.gz", "findings": [{"key": "k1", "organ": "O", "finding": "F", "prob": 0.5}],
               "organs_scored": [], "organs_not_found": [], "organ_stats": {}, "trace": {},
               "timings": {"infer_s": 1.0, "postprocess_s": 0.1}, "mask": None, "affine": None}
 

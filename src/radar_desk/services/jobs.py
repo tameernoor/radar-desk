@@ -96,6 +96,8 @@ class JobService:
             except Exception as exc:
                 raise ServiceError(502, f"could not cancel the GPU call: {exc}") from exc
         now = self.clock()
+        if not getattr(self.backend, "priced", True):
+            return self.db.transition(job, "cancelled", finished_at=iso_at(now))
         cost = (job.cost_estimate_usd or 0.0) + self.costs.attempt_cost(job, None, None, now)
         return self.db.transition(job, "cancelled", finished_at=iso_at(now), cost_estimate_usd=cost)
 
@@ -103,7 +105,7 @@ class JobService:
         """Re-queue a failed job, or release a held one. Earlier attempts' cost stays."""
         job = self.get(job_id)
         if job.state == "failed":
-            return self.db.transition(job, "queued", queued_at=iso_at(self.clock()))
+            return self.db.transition(job, "queued", queued_at=iso_at(self.clock()), lease_losses=0)
         if job.state == "queued":
             return self.db.update_job(job_id, hold_reason=None) if job.hold_reason else job
         raise ServiceError(409, f"job {job_id} is {job.state} and cannot be retried")

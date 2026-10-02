@@ -1,0 +1,10 @@
+# Ignore file for worker/docker/Dockerfile. Allowlist, so only what the Dockerfile copies
+# enters the build context (no .env, no virtualenvs, no data).
+*
+!worker/vendor/damo-radar
+!worker/weights.json
+!scripts/ensure_weights.py
+!worker/docker/entrypoint.sh
+!worker/radar_worker
+**/__pycache__
+**/*.pyc

@@ -62,6 +62,15 @@ class Timings(BaseModel):
     total_s: float | None = None
 
 
+class Lease(BaseModel):
+    """A pull worker's hold on a submitted job. The lease id itself is the job's `modal_call_id`."""
+
+    worker_id: str
+    expires_at: str
+    heartbeat_at: str
+    progress: str | None = None
+
+
 class Job(BaseModel):
     id: str
     scan_id: str
@@ -77,6 +86,33 @@ class Job(BaseModel):
     error: JobError | None = None
     timings: Timings | None = None
     cost_estimate_usd: float | None = None
+    lease: Lease | None = None
+    lease_losses: int = 0
+
+
+class WorkerToken(BaseModel):
+    """A pull worker's credential. Only the sha256 of the plaintext is kept."""
+
+    id: str
+    name: str
+    token_hash: str
+    created_at: str = Field(default_factory=now_iso)
+    revoked_at: str | None = None
+    last_used_at: str | None = None
+
+
+class Worker(BaseModel):
+    """A pull worker as it last reported itself. The id is chosen by the worker."""
+
+    id: str
+    token_id: str
+    hostname: str | None = None
+    gpu_name: str | None = None
+    device: str | None = None
+    versions: dict[str, Any] = Field(default_factory=dict)
+    first_seen_at: str = Field(default_factory=now_iso)
+    last_seen_at: str = Field(default_factory=now_iso)
+    job_id: str | None = None
 
 
 class Finding(BaseModel):

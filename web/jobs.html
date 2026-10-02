@@ -32,6 +32,40 @@
       </div>
       <p class="muted" id="jobs-empty" hidden>No jobs yet.</p>
     </section>
+    <section aria-labelledby="workers-title">
+      <h2 id="workers-title">Workers</h2>
+      <p class="status-line error" id="workers-status" role="status" aria-live="polite"></p>
+      <h3>Tokens</h3>
+      <form class="row" id="token-form">
+        <input type="text" id="token-name" aria-label="Token name" placeholder="Token name" maxlength="100" required>
+        <button type="submit">Create token</button>
+      </form>
+      <div class="row" id="token-new" hidden>
+        <code id="token-plain"></code>
+        <button type="button" id="token-copy">Copy</button>
+        <span class="muted">Shown once. Store it now.</span>
+      </div>
+      <div class="table-wrap">
+        <table class="grid" id="tokens-table">
+          <thead><tr><th>Name</th><th>Created</th><th>Last used</th><th>State</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <h3>Connected workers</h3>
+      <div class="table-wrap">
+        <table class="grid" id="workers-table">
+          <thead><tr><th>Worker</th><th>Host</th><th>GPU</th><th>State</th><th>Job</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="muted" id="workers-empty" hidden>No worker has reported in yet.</p>
+      <h3>Run line</h3>
+      <div class="row">
+        <pre class="log"><code id="run-line"></code></pre>
+        <button type="button" id="run-copy">Copy</button>
+      </div>
+      <p class="muted small">The app must be reachable from the pod, so RADAR_DESK_URL is a public or tunnel URL. The weights are filled on /workspace on first start.</p>
+    </section>
   </main>
   <footer class="footer">
     <p class="licence">Model: RADAR by Alibaba DAMO Academy, CC BY-NC-SA 4.0. Paper: "An expert-level generalist AI for abdominal CT diagnosis", Science 393(6817), doi 10.1126/science.aec6129. Weights: <a href="https://huggingface.co/radar-generalist/RADAR" rel="noopener">huggingface.co/radar-generalist/RADAR</a>.</p>

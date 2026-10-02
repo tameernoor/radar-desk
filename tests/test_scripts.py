@@ -32,3 +32,13 @@ def test_export_all_writes_one_row_per_done_job(make_services, tmp_path):
     rows = list(csv.reader(io.StringIO(out.read_bytes().decode("utf-8-sig"))))
     assert rows[0] == catalog.csv_header()
     assert len(rows) == 3 and all(r[0] == scan.filename for r in rows[1:])
+
+
+def test_seed_dev_runs_in_a_fresh_interpreter(tmp_path):
+    """The seed imports the poller before the services; a circular import there broke it once."""
+    env = {k: v for k, v in os.environ.items() if k not in ("GPU_BACKEND", "DATA_DIR")}
+    env.update(OWNER_TOKEN="t", SESSION_SECRET="s", DATA_DIR=str(tmp_path / "data"), GPU_BACKEND="fake")
+    proc = subprocess.run([sys.executable, str(ROOT / "scripts" / "seed_dev.py")],
+                          cwd=tmp_path, env=env, capture_output=True, text=True, check=False)
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.startswith("scan_id scan_")
