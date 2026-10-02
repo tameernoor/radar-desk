@@ -19,7 +19,7 @@ A score is how close an organ looks to a finding's text, not a calibrated probab
 
 ## How it works
 
-The browser uploads to a FastAPI server, which stores the scan on a Modal Volume. A Modal function on an L4 GPU runs DAMO's own PyTorch code and checkpoint, unedited, and writes the scores and the organ mask back to the Volume. The viewer (NiiVue) reads them through the API. The chat panel is persona, backed by any OpenAI-compatible model, OpenRouter by default.
+The browser uploads to a FastAPI server, which stores the scan on a Modal Volume. A Modal function on an L4 GPU runs DAMO's own PyTorch code and checkpoint, unedited, and writes the scores and the organ mask back to the Volume. The viewer (NiiVue) reads them through the API. The chat panel is persona, backed by any OpenAI-compatible model. `LLM_PROVIDER` picks OpenRouter (the default), a local Ollama or another endpoint.
 
 ## Results
 

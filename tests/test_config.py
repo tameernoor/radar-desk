@@ -9,7 +9,7 @@ from radar_desk.config import ConfigError, Settings, load_settings
 
 ENV_NAMES = [
     "OWNER_TOKEN", "SESSION_SECRET", "GPU_BACKEND", "MAX_UPLOAD_BYTES", "GPU_MONTHLY_BUDGET_USD",
-    "RADAR_GPU", "MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET", "LLM_API_KEY", "LLM_BASE_URL", "DATA_DIR", "CHAT_MODEL",
+    "RADAR_GPU", "MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET", "LLM_PROVIDER", "LLM_API_KEY", "LLM_BASE_URL", "DATA_DIR", "CHAT_MODEL",
     "STORAGE_BACKEND", "MODAL_DATA_VOLUME", "S3_BUCKET",
 ]
 
@@ -33,7 +33,9 @@ def test_loads_from_env_with_defaults(monkeypatch):
     assert s.gpu_prices_usd_per_s["H100"] == 0.001097
     assert s.gpu_list == ["L4"]
     assert s.llm_api_key is None
-    assert s.llm_base_url == "https://openrouter.ai/api/v1"
+    assert s.llm_provider is None and s.llm_base_url is None
+    assert s.resolved_llm_provider == "openrouter"
+    assert s.resolved_llm_base_url == "https://openrouter.ai/api/v1"
 
 
 def test_loads_from_env_file(tmp_path: Path):

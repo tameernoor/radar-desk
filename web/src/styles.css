@@ -218,3 +218,8 @@ kbd { font: 0.7rem var(--mono); padding: 0 0.3rem; border: 1px solid var(--line)
 .look-card .line-tag { margin-left: 0.4rem; padding: 0 0.3rem; border: 1px solid var(--accent); border-radius: 3px; color: var(--accent); font-size: 0.7rem; font-weight: 400; white-space: nowrap; }
 .look-card .look-actions { display: flex; gap: 0.4rem; margin-top: 0.5rem; }
 .look-card .look-footer { color: var(--warn); font-size: 0.78rem; border-top: 1px solid var(--line); padding-top: 0.4rem; }
+
+/* Provider note in the chat panel, above the composer. */
+.chat-status { margin: 0 0 0.3rem; padding: 0 0.9rem; font-size: 0.75rem; color: var(--muted); }
+.chat-status-warn { color: var(--warn); }
+.chat-status code { font: 0.72rem var(--mono); padding: 0 0.25rem; border: 1px solid var(--line); border-radius: 3px; background: var(--panel-2); color: var(--text); }

@@ -1,7 +1,8 @@
-"""A streaming client for OpenAI-compatible chat completions (OpenRouter by default).
+"""A streaming client for OpenAI-compatible chat completions (OpenRouter, Ollama or any other).
 
 `stream_chat` yields TextDelta for each content fragment, then one ToolCall per tool call
-(assembled from its streamed fragments by index), then Done with the finish reason.
+(assembled from its streamed fragments by index), then Done with the finish reason. Headers and
+error parsing come from the ProviderSpec in providers.py.
 """
 
 from __future__ import annotations
@@ -13,6 +14,8 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import httpx
+
+from radar_desk.chat.providers import ProviderSpec, get_provider, message_of
 
 
 class LlmError(RuntimeError):
@@ -60,16 +63,18 @@ class OpenAICompatibleLLM:
     def __init__(
         self,
         base_url: str,
-        api_key: str,
+        api_key: str | None,
         model: str,
         client: httpx.AsyncClient | None = None,
         timeout_s: float = 120.0,
+        provider: ProviderSpec | None = None,
     ) -> None:
         self.url = base_url.rstrip("/") + "/chat/completions"
-        self.api_key = api_key
+        self.api_key = api_key or ""
         self.model = model
         self.client = client
         self.timeout_s = timeout_s
+        self.provider = provider or get_provider("openrouter")
 
     def request_body(self, messages: list[dict], tools: list[dict]) -> dict:
         body: dict[str, Any] = {"model": self.model, "messages": messages, "stream": True}
@@ -90,11 +95,9 @@ class OpenAICompatibleLLM:
     async def _stream(
         self, client: httpx.AsyncClient, messages: list[dict], tools: list[dict]
     ) -> AsyncIterator[LlmEvent]:
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Accept": "text/event-stream",
-            "X-Title": "radar-desk",
-        }
+        headers = {"Accept": "text/event-stream", **self.provider.extra_headers}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         try:
             async with client.stream(
                 "POST", self.url, json=self.request_body(messages, tools), headers=headers
@@ -102,7 +105,7 @@ class OpenAICompatibleLLM:
                 if resp.status_code >= 300:
                     body = (await resp.aread()).decode("utf-8", "replace")
                     raise LlmError(
-                        f"the model endpoint returned {resp.status_code}: {error_message(body)}",
+                        f"the model endpoint returned {resp.status_code}: {self.provider.parse_error(body)}",
                         resp.status_code,
                     )
                 async for event in parse_stream(resp.aiter_lines()):
@@ -111,25 +114,15 @@ class OpenAICompatibleLLM:
             raise LlmError(f"could not reach the model endpoint: {type(exc).__name__}: {exc}") from exc
 
 
-def error_message(body: str) -> str:
-    """The provider's own message from an error body shaped {"error": {"code", "message"}}, else the raw text."""
-    try:
-        err = json.loads(body).get("error")
-    except (ValueError, AttributeError):
-        err = None
-    return _message_of(err, body)
-
-
-def _message_of(err: Any, fallback: str) -> str:
-    """err["message"] when it is a non-empty string, else the fallback text; capped at 300 characters."""
-    if isinstance(err, dict) and isinstance(err.get("message"), str) and err["message"]:
-        return err["message"][:300]
-    return fallback[:300]
-
-
 async def parse_stream(lines: AsyncIterator[str]) -> AsyncIterator[LlmEvent]:
-    """OpenAI-style SSE lines to events. Tool calls are yielded once the stream ends."""
-    calls: dict[int, dict[str, Any]] = {}
+    """OpenAI-style SSE lines to events. Tool calls are yielded once the stream ends.
+
+    OpenRouter streams a call's arguments in fragments that share an index. Ollama sends each call
+    whole in one delta with its own id (openai.go, ToToolCalls and toChunk), so a fragment with a new
+    id on an index already in use starts a new call instead of extending the old one.
+    """
+    calls: list[dict[str, Any]] = []
+    by_index: dict[int, dict[str, Any]] = {}
     finish: str | None = None
     async for line in lines:
         line = line.strip()
@@ -148,7 +141,7 @@ async def parse_stream(lines: AsyncIterator[str]) -> AsyncIterator[LlmEvent]:
             err = chunk["error"]
             code = err.get("code") if isinstance(err, dict) else None
             status = code if isinstance(code, int) and not isinstance(code, bool) else None
-            message = _message_of(err, data if isinstance(err, dict) else str(err))
+            message = message_of(err, data if isinstance(err, dict) else str(err))
             prefix = f"the model endpoint reported an error {status}" if status else "the model endpoint reported an error"
             raise LlmError(f"{prefix}: {message}", status)
         for choice in chunk.get("choices") or []:
@@ -156,10 +149,18 @@ async def parse_stream(lines: AsyncIterator[str]) -> AsyncIterator[LlmEvent]:
             if delta.get("content"):
                 yield TextDelta(delta["content"])
             for frag in delta.get("tool_calls") or []:
-                slot = calls.setdefault(frag.get("index", 0), {"id": None, "name": "", "arguments": ""})
+                index = frag.get("index", 0)
+                slot = by_index.get(index)
+                fn = frag.get("function") or {}
+                new_id = bool(frag.get("id") and slot and slot["id"] and frag["id"] != slot["id"])
+                # Whole calls without ids can share an index too: a second name means a second call.
+                new_name = bool(slot and not frag.get("id") and fn.get("name") and slot["name"])
+                if slot is None or new_id or new_name:
+                    slot = {"id": None, "name": "", "arguments": ""}
+                    calls.append(slot)
+                    by_index[index] = slot
                 if frag.get("id"):
                     slot["id"] = frag["id"]
-                fn = frag.get("function") or {}
                 if fn.get("name") and not slot["name"]:
                     slot["name"] = fn["name"]
                 if fn.get("arguments"):
@@ -168,8 +169,7 @@ async def parse_stream(lines: AsyncIterator[str]) -> AsyncIterator[LlmEvent]:
                 raise LlmError("the model endpoint ended the stream with an error and gave no details")
             if choice.get("finish_reason"):
                 finish = choice["finish_reason"]
-    for index in sorted(calls):
-        slot = calls[index]
+    for slot in calls:
         yield ToolCall(
             id=slot["id"] or f"call_{uuid.uuid4().hex[:24]}",
             name=slot["name"],
