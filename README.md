@@ -47,6 +47,8 @@ Open http://127.0.0.1:8000 and log in with your `OWNER_TOKEN`. With `GPU_BACKEND
 
 Any NVIDIA machine can score instead of Modal. Set `GPU_BACKEND=worker`, create a worker token on the jobs page, build `worker/docker/Dockerfile` and run `docker run --gpus all -v /workspace:/workspace -e RADAR_DESK_URL=<app url> -e RADAR_WORKER_TOKEN=<token> radar-worker`; the weights are fetched to `/workspace/radar-weights` on first start.
 
+`uv run python -m radar_desk.compute runpod|modal|status|stop` switches scoring between Modal and a RunPod pod. It edits `GPU_BACKEND` in `.env`, you restart the app, and `runpod` then starts the tunnel, the worker token and the pod. It needs `WORKER_IMAGE` and the `RUNPOD_*` keys from `.env.example`.
+
 Tests are `uv run pytest` and, in `web/`, `npm test`.
 
 ## Licence
