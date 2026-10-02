@@ -5,12 +5,18 @@ import { huGuess } from "./hu.js";
 export const LOOK_FOOTER = "Outlines are RADAR's segmentation, not confirmed anatomy.";
 const MAX_FINDINGS = 3;
 const PLANE_NAMES = { axial: "Axial", coronal: "Coronal", sagittal: "Sagittal" };
-const VIEW_NAMES = { axial: "Axial view", coronal: "Coronal view", sagittal: "Sagittal view", multiplanar: "Multiplanar view", render: "3D view" };
+const VIEW_NAMES = { axial: "Axial view", coronal: "Coronal view", sagittal: "Sagittal view", render: "3D view" };
+
+// In multiplanar, plane is the main view's plane and slice_type is "multiplanar".
+function viewName(view) {
+  if (view.slice_type === "multiplanar") return `${PLANE_NAMES[view.plane] || "Axial"} view, main view of three`;
+  return VIEW_NAMES[view.plane] || null;
+}
 
 function planeLine(view) {
   const s = view.slice;
   const where = `${PLANE_NAMES[s.axis]} slice ${s.number} of ${s.count}`;
-  if (view.plane === "multiplanar") return `Multiplanar view, ${where.toLowerCase()}`;
+  if (view.slice_type === "multiplanar") return `${where}, main view of three`;
   if (view.plane === "render") return `3D view, ${where.toLowerCase()}`;
   return where;
 }
@@ -56,7 +62,7 @@ export function buildLookCard(view, findings = [], catalog = []) {
   const thresholdPct = view.threshold_pct ?? 50;
   const card = { empty: false, plane: null, organs: [], note: null, point: pointLines(view), footer: LOOK_FOOTER };
   if (!view.slice) {
-    card.plane = VIEW_NAMES[view.plane] || null;
+    card.plane = viewName(view);
     card.note = "The CT is loaded, but RADAR's outlines are not there yet. The HU value under the crosshair is below.";
     return card;
   }

@@ -93,15 +93,19 @@ test("nothing loaded, and CT without a mask", () => {
   expect(nothing).toMatchObject({ empty: true, message: "No CT is on screen.", footer: LOOK_FOOTER });
   const noMask = buildLookCard(view({ slice: null, organs_on_slice: null, crosshair: { mm: [0, 0, 0], hu: 70, label: null, organ: null } }), [], CATALOG);
   expect(noMask.plane).toBe("Axial view");
-  expect(buildLookCard(view({ plane: "multiplanar", slice: null, crosshair: { mm: [0, 0, 0], hu: 70, label: null, organ: null } }), [], CATALOG).plane).toBe("Multiplanar view");
+  expect(
+    buildLookCard(view({ slice_type: "multiplanar", plane: "coronal", slice: null, crosshair: { mm: [0, 0, 0], hu: 70, label: null, organ: null } }), [], CATALOG).plane,
+  ).toBe("Coronal view, main view of three");
   expect(noMask.organs).toEqual([]);
   expect(noMask.note).toBe("The CT is loaded, but RADAR's outlines are not there yet. The HU value under the crosshair is below.");
   expect(noMask.point.where).toBeNull();
   expect(noMask.point.hu).toBe(`70 HU, in the Blood range (${HU_CAVEAT}).`);
 });
 
-test("multiplanar names the axial slice", () => {
-  expect(buildLookCard(view({ plane: "multiplanar" }), FINDINGS, CATALOG).plane).toBe("Multiplanar view, axial slice 16 of 24");
+test("multiplanar names the main view's slice", () => {
+  const card = buildLookCard(view({ slice_type: "multiplanar", plane: "sagittal", slice: { axis: "sagittal", index: 3, number: 4, count: 64 } }), FINDINGS, CATALOG);
+  expect(card.plane).toBe("Sagittal slice 4 of 64, main view of three");
+  expect(buildLookCard(view({ plane: "render" }), FINDINGS, CATALOG).plane).toBe("3D view, axial slice 16 of 24");
 });
 
 test("HU table matches the chat prompt's table", () => {

@@ -182,7 +182,9 @@ html:has(.workspace-page), .workspace-page { height: 100%; }
 .inline { display: inline-flex; gap: 0.3rem; align-items: center; font-size: 0.8rem; color: var(--muted); }
 .inline input { width: 5rem; }
 .viewer-wrap { position: relative; flex: 1; min-height: 0; }
-.viewer-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+/* touch-action none: the browser does not pan or zoom the page on the canvas, so a blocked
+   touch over a reference view does nothing, and a tap still produces the click that swaps. */
+.viewer-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
 .viewer-notice {
   position: absolute; left: 50%; top: 1rem; transform: translateX(-50%); max-width: 80%;
   background: rgb(20 22 26 / 0.92); border: 1px solid var(--line); border-radius: 6px; padding: 0.5rem 0.8rem;

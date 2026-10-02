@@ -16,6 +16,17 @@ function getViewState(page) {
   });
 }
 
+// Centre of NiiVue tile i in CSS pixels: leftTopWidthHeight is in canvas pixels (CSS times uiData.dpr).
+function tileCentre(page, i) {
+  return page.evaluate((i) => {
+    const nv = window.__radar.viewer.nv;
+    const [l, t, w, h] = nv.screenSlices[i].leftTopWidthHeight;
+    const dpr = nv.uiData.dpr || 1;
+    const rect = nv.canvas.getBoundingClientRect();
+    return { x: rect.left + (l + w / 2) / dpr, y: rect.top + (t + h / 2) / dpr };
+  }, i);
+}
+
 async function login(page) {
   await page.goto("/");
   const res = await page.request.post("/auth/login", { data: { token: TOKEN } });
@@ -120,4 +131,56 @@ test("workspace: findings, viewer, page tools, keys", async ({ page }) => {
   await page.mouse.move(cardBox.x - 40, box.y + box.height / 2);
   await page.mouse.wheel(0, 100);
   await expect(card).toBeHidden();
+
+  // Multiplanar: one main view and two reference views.
+  await page.keyboard.press("m");
+  const layout = await page.evaluate(() => window.__radar.viewer.nv.getCustomLayout());
+  expect(layout).toHaveLength(3);
+  expect(layout[0].sliceType).toBe(0); // axial main, as the single view was axial
+  expect([layout[0].position[2], layout[0].position[3]].sort()).toEqual([0.75, 1]); // 75% one way, full the other
+  let vs = await page.evaluate(() => window.__radar.viewState());
+  expect(vs.main_plane).toBe("axial");
+  expect(vs.reference_planes).toEqual(["coronal", "sagittal"]);
+
+  // Wheel over either reference tile moves nothing: NiiVue never sees it, so the crosshair
+  // (which fixes every plane's slice) stays exactly where it was.
+  const crosshair = () => page.evaluate(() => Array.from(window.__radar.viewer.nv.scene.crosshairPos));
+  const posBeforeRefs = await crosshair();
+  const mainBefore = vs.slice;
+  for (const i of [1, 2]) {
+    const c = await tileCentre(page, i);
+    await page.mouse.move(c.x, c.y);
+    await page.mouse.wheel(0, 100);
+    await page.waitForTimeout(200);
+    expect(await crosshair()).toEqual(posBeforeRefs);
+  }
+  vs = await page.evaluate(() => window.__radar.viewState());
+  expect(vs.slice).toEqual(mainBefore);
+
+  // A click on a reference tile makes it the main view, and the crosshair stays put.
+  const refCentre = await tileCentre(page, 1);
+  await page.mouse.click(refCentre.x, refCentre.y);
+  expect(await crosshair()).toEqual(posBeforeRefs);
+  vs = await page.evaluate(() => window.__radar.viewState());
+  expect(vs.main_plane).toBe("coronal");
+  expect(vs.plane).toBe("coronal");
+  expect(vs.slice.axis).toBe("coronal");
+  expect(await page.evaluate(() => window.__radar.viewer.nv.getCustomLayout()[0].sliceType)).toBe(1);
+
+  // The card names the new main view.
+  await page.keyboard.press("w");
+  await expect(card).toContainText(`Coronal slice ${vs.slice.number} of ${vs.slice.count}, main view of three`);
+  await page.keyboard.press("Escape");
+
+  // Wheel over the main tile still scrolls.
+  const mainCentre = await tileCentre(page, 0);
+  await page.mouse.move(mainCentre.x, mainCentre.y);
+  await page.mouse.wheel(0, 100);
+  await expect.poll(async () => (await page.evaluate(() => window.__radar.viewState())).slice.index).not.toBe(vs.slice.index);
+
+  // m again leaves multiplanar for a single view of the main plane.
+  await page.keyboard.press("m");
+  vs = await page.evaluate(() => window.__radar.viewState());
+  expect([vs.slice_type, vs.plane, vs.reference_planes]).toEqual(["coronal", "coronal", []]);
+  expect(await page.evaluate(() => window.__radar.viewer.nv.getCustomLayout())).toBeNull();
 });
