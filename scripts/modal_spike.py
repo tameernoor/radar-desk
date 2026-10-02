@@ -95,7 +95,7 @@ def measure(gpu_label: str, remote_paths: list) -> dict:
     state = modal_app.weights_state(print)
     if not state["ok"]:
         return {"gpu_requested": gpu_label, "error": "weights_mismatch", "problems": state["problems"]}
-    loaded = infer.load_model(modal_app.WEIGHTS_DIR)
+    loaded = infer.load_model(modal_app.WEIGHTS_DIR, device="cuda")
     load_s = time.perf_counter() - t
     scans = []
     for rel in remote_paths:

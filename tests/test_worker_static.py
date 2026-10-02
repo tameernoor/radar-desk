@@ -14,7 +14,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKER = ROOT / "worker"
-SCRIPTS = [ROOT / "scripts" / n for n in ("weights_check.py", "modal_spike.py", "parity.py")]
+SCRIPTS = [ROOT / "scripts" / n for n in ("weights_check.py", "modal_spike.py", "parity.py", "score_local.py")]
 PY310_FILES = sorted((WORKER / "radar_worker").glob("*.py")) + [WORKER / "modal_app.py"] + SCRIPTS
 
 EXPECTED_WEIGHTS = {
@@ -73,7 +73,7 @@ def test_worker_never_imports_the_api_package():
 
 def test_geometry_and_io_need_only_numpy_nibabel_stdlib():
     allowed_third_party = {"numpy", "nibabel", "nibabel.orientations"}
-    for name in ("geometry.py", "io.py", "__init__.py"):
+    for name in ("geometry.py", "io.py", "weights.py", "__init__.py"):
         for mod in _imports(WORKER / "radar_worker" / name):
             top = mod.split(".")[0]
             assert mod in allowed_third_party or top in sys.stdlib_module_names, (name, mod)
@@ -317,7 +317,7 @@ def test_existing_artefact_is_artefact_exists_not_input_error(modal_app, monkeyp
 
     monkeypatch.setattr(modal_app, "weights_state", lambda log: {"ok": True, "checkpoint_sha256": "x"})
     monkeypatch.setattr(modal_app, "versions", lambda sha: {})
-    monkeypatch.setattr(infer, "load_model", lambda d: loaded)
+    monkeypatch.setattr(infer, "load_model", lambda d, device=None: loaded)
     monkeypatch.setattr(infer, "score_file", lambda p, m, log: dict(scored))
     monkeypatch.setattr(geometry, "write_mask", write_mask)
 
@@ -333,3 +333,145 @@ def test_existing_artefact_is_artefact_exists_not_input_error(modal_app, monkeyp
     assert out["ok"] is False and out["error"]["class"] == "artefact_exists"
     assert "volume://jobs/j1/mask.nii.gz" in out["error"]["message"]
     assert taken.read_bytes() == b"from the first attempt" and commits == []
+
+
+# ---------------------------------------------------------------- devices (no torch needed)
+
+
+class _FakeDevice:
+    def __init__(self, kind):
+        self.type = kind
+
+    def __str__(self):
+        return self.type
+
+
+def _fake_torch(cuda: bool, mps: bool):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        device=_FakeDevice,
+        cuda=SimpleNamespace(is_available=lambda: cuda, get_device_name=lambda d=None: "NVIDIA L4"),
+        backends=SimpleNamespace(mps=SimpleNamespace(is_available=lambda: mps)),
+    )
+
+
+@pytest.fixture()
+def infer_mod(monkeypatch):
+    monkeypatch.syspath_prepend(str(WORKER))
+    monkeypatch.delenv("RADAR_DEVICE", raising=False)
+    from radar_worker import infer
+
+    return infer
+
+
+@pytest.mark.parametrize(("cuda", "mps", "want"), [
+    (True, True, "cuda"), (True, False, "cuda"), (False, True, "mps"), (False, False, "cpu"),
+])
+def test_auto_device_prefers_cuda_then_mps_then_cpu(infer_mod, monkeypatch, cuda, mps, want):
+    monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda, mps))
+    assert infer_mod.resolve_device().type == want  # RADAR_DEVICE unset means auto
+    assert infer_mod.resolve_device("auto").type == want
+    monkeypatch.setenv("RADAR_DEVICE", " AUTO ")
+    assert infer_mod.resolve_device().type == want
+
+
+def test_explicit_device_and_env(infer_mod, monkeypatch):
+    monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda=False, mps=True))
+    assert infer_mod.resolve_device("cpu").type == "cpu"
+    assert infer_mod.resolve_device("mps").type == "mps"
+    monkeypatch.setenv("RADAR_DEVICE", "cpu")
+    assert infer_mod.resolve_device().type == "cpu"
+    assert infer_mod.resolve_device("mps").type == "mps"  # an argument wins over the env
+    dev = _FakeDevice("mps")
+    assert infer_mod.resolve_device(dev) is dev
+
+
+@pytest.mark.parametrize(("name", "cuda", "mps"), [("cuda", False, True), ("mps", True, False), ("tpu", True, True)])
+def test_unavailable_or_unknown_device_raises(infer_mod, monkeypatch, name, cuda, mps):
+    monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda, mps))
+    with pytest.raises(ValueError, match=name):
+        infer_mod.resolve_device(name)
+
+
+def test_device_name_per_device(infer_mod, monkeypatch):
+    monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda=True, mps=True))
+    assert infer_mod.device_name(_FakeDevice("cuda")) == "NVIDIA L4"
+    assert infer_mod.device_name(_FakeDevice("mps")) == "Apple MPS"
+    assert infer_mod.device_name(_FakeDevice("cpu")) == "cpu"
+
+
+def test_peak_rss_units(infer_mod):
+    assert infer_mod.peak_rss_bytes(2048, "darwin") == 2048
+    assert infer_mod.peak_rss_bytes(2048, "linux") == 2048 * 1024
+
+
+def _center_crop_on_cuda(shape, crop_size):
+    """Upstream center_crop's arithmetic for an empty mask, with CUDA's inf -> INT64_MAX."""
+    big = 2**63 - 1
+    lo = {"x": big, "y": big, "z": big}
+    hi = {"x": 0, "y": 0, "z": 0}
+    d, h, w = shape
+    out = []
+    for axis, n, c in (("z", d, crop_size[0]), ("y", h, crop_size[1]), ("x", w, crop_size[2])):
+        size = max(c, hi[axis] - lo[axis])
+        centre = (lo[axis] + hi[axis]) // 2
+        start = max(0, centre - size // 2)
+        end = min(n, start + size)
+        if end - start < size:
+            start = max(0, end - size)
+        out.append([start, end])
+    return out
+
+
+@pytest.mark.parametrize("shape", [(96, 256, 384), (128, 288, 416), (192, 512, 512), (64, 224, 352)])
+def test_far_corner_box_matches_cuda_arithmetic(infer_mod, shape):
+    assert infer_mod.far_corner_box((1, 1, *shape)) == _center_crop_on_cuda(shape, infer_mod.ROI_SIZE)
+
+
+def test_modal_loads_the_model_on_cuda_explicitly(modal_app, monkeypatch):
+    """A container with broken CUDA fails at load instead of scoring on another device."""
+    from radar_worker import infer
+
+    asked = []
+
+    class Stop(Exception):
+        pass
+
+    def load_model(weights_dir, device=None):
+        asked.append(device)
+        raise Stop
+
+    monkeypatch.setattr(modal_app, "weights_state", lambda log: {"ok": True, "checkpoint_sha256": "x"})
+    monkeypatch.setattr(infer, "load_model", load_model)
+    with pytest.raises(Stop):
+        modal_app.run_job("j1", lambda work, log: None, lambda *a: None)
+    assert asked == ["cuda"]
+    assert "env" not in modal_app.FUNCTION_OPTIONS
+
+
+@pytest.mark.parametrize("name", ["parity.py", "modal_spike.py"])
+def test_modal_scripts_load_the_model_on_cuda(name):
+    tree = ast.parse((ROOT / "scripts" / name).read_text(encoding="utf-8"))
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+             and isinstance(n.func, ast.Attribute) and n.func.attr == "load_model"]
+    assert calls, name
+    for call in calls:
+        devices = [k.value.value for k in call.keywords if k.arg == "device" and isinstance(k.value, ast.Constant)]
+        assert devices == ["cuda"], (name, ast.unparse(call))
+
+
+def test_score_local_device_choices(monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    monkeypatch.syspath_prepend(str(WORKER))
+    sys.modules.pop("score_local", None)
+    score_local = importlib.import_module("score_local")
+    try:
+        args = score_local.parse_args(["--path", "a.nii.gz", "--weights", "w", "--out", "o.json"])
+        assert args.device == "auto"
+        args = score_local.parse_args(["--device", "mps", "--path", "a", "--weights", "w", "--out", "o"])
+        assert args.device == "mps"
+        with pytest.raises(SystemExit):
+            score_local.parse_args(["--device", "tpu", "--path", "a", "--weights", "w", "--out", "o"])
+    finally:
+        sys.modules.pop("score_local", None)
