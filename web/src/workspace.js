@@ -4,6 +4,7 @@ import { mountChat } from "./chat.js";
 import { createFindings } from "./findings.js";
 import { buildLookCard } from "./lookcard.js";
 import { bytes, dims, el, elapsed, shortId, spacing, usd, when } from "./format.js";
+import { rangeOf, sliderFromWidth, widthFromSlider } from "./light.js";
 import { wireLogout } from "./login.js";
 import { registerPageTools } from "./pagetools.js";
 import { organCss, UNSCORED_GREY } from "./palette.js";
@@ -29,6 +30,7 @@ const ws = {
   catalog: [],
   chat: null,
   ctLoaded: false,
+  focus: false, // focus mode: the viewer over the whole window
 };
 
 // ---------- notices ----------
@@ -109,7 +111,7 @@ function selectFinding(keyOrName) {
 
 function setBoxOn(on) {
   ws.boxOn = on;
-  $("box-toggle").setAttribute("aria-pressed", String(on));
+  syncControls();
 }
 
 function showScoringBox(organ, on) {
@@ -129,18 +131,91 @@ function showScoringBox(organ, on) {
 function toggleMask(on) {
   const next = on ?? !ws.viewer.state().mask_on;
   ws.viewer.setMaskVisible(next);
-  $("mask-toggle").setAttribute("aria-pressed", String(next));
+  syncControls();
   return { ok: true, mask_on: next, mask_loaded: ws.viewer.state().mask_loaded };
 }
 
-// Called by the viewer for presets and for right-drag ("custom").
-function markWindow(preset) {
-  for (const b of document.querySelectorAll("[data-window]")) b.setAttribute("aria-pressed", String(b.dataset.window === preset));
+function setOutline(on) {
+  ws.viewer.setOutline(on ?? !ws.viewer.state().outline);
+  syncControls();
 }
 
+// The viewer calls onLight (and so syncControls) after every light change, right-drag included.
 function setWindow(preset) {
   ws.viewer.setWindow(preset);
   return { ok: true, window_preset: preset, hu_range: [WINDOWS[preset].min, WINDOWS[preset].max] };
+}
+
+function setWindowLevel({ width, level }) {
+  if (!Number.isFinite(width) || !Number.isFinite(level)) throw new Error("width and level must be numbers in HU.");
+  const { min, max } = rangeOf(width, level);
+  ws.viewer.setWindowHU(min, max);
+  const v = ws.viewer.state();
+  return { ok: true, window_preset: v.window_preset, window_hu: v.window_hu };
+}
+
+// Back to the default look: soft tissue, gamma 1, no invert, gray, mask on at 0.45, no outline.
+// Zoom and pan are left alone.
+function resetLight() {
+  ws.viewer.resetLight();
+  ws.viewer.setMaskVisible(true);
+  ws.viewer.setMaskOpacity(0.45);
+  ws.viewer.setOutline(false);
+  syncControls();
+}
+
+function setZoom(zoom) {
+  ws.viewer.setZoom(zoom);
+  return { ok: true, zoom: ws.viewer.state().zoom };
+}
+
+function toggleLight(on) {
+  $("light-panel").hidden = !(on ?? $("light-panel").hidden);
+  syncControls();
+}
+
+// Focus mode covers the page with the viewer and hides the chat. It touches no viewer state;
+// NiiVue's own ResizeObserver resizes the canvas and the viewer's one redoes the multiplanar layout.
+function toggleFocus(on) {
+  const next = on ?? !ws.focus;
+  if (next !== ws.focus) {
+    ws.focus = next;
+    document.body.classList.toggle("focus", next);
+    // In multiplanar any right-side panel covers a reference view, so it waits for the Light button there.
+    $("light-panel").hidden = !next || ws.viewer.state().slice_type === "multiplanar";
+  }
+  syncControls();
+  return { ok: true, focus: ws.focus };
+}
+
+// Every toolbar and panel control from the viewer's state, so clicks, keys, page tools and
+// right-drag all show the same thing. `from` is the input being dragged; it is left alone so
+// the log-scaled width slider does not snap under the pointer.
+function syncControls(from = null) {
+  const v = ws.viewer.state();
+  const press = (selector, on) => {
+    for (const b of document.querySelectorAll(selector)) b.setAttribute("aria-pressed", String(typeof on === "function" ? on(b) : on));
+  };
+  const set = (id, value) => $(id) !== from && ($(id).value = String(value));
+  press("[data-slice]", (b) => b.dataset.slice === v.slice_type || (v.slice_type === "multiplanar" && b.dataset.slice === v.main_plane));
+  press("[data-window]", (b) => b.dataset.window === v.window_preset);
+  press("[data-mask]", v.mask_on);
+  press("[data-outline]", v.outline);
+  for (const input of document.querySelectorAll("[data-mask-opacity]")) if (input !== from) input.value = String(Math.round(v.mask_opacity * 100));
+  press("#box-toggle", ws.boxOn);
+  press("#focus-toggle", ws.focus);
+  press("#light-toggle", !$("light-panel").hidden);
+  const hu = (x) => String(Math.round(x * 10) / 10);
+  const w = v.window_hu;
+  set("ww", sliderFromWidth(w.width));
+  set("wl", Math.round(w.level));
+  $("ww-value").textContent = hu(w.width);
+  $("wl-value").textContent = hu(w.level);
+  $("window-range").textContent = `${hu(w.min)} to ${hu(w.max)} HU`;
+  set("gamma", v.gamma);
+  $("gamma-value").textContent = v.gamma.toFixed(2);
+  press("#invert", v.invert);
+  set("colormap", v.colormap);
 }
 
 // Multiplanar toggles; a plane button in multiplanar picks the main view.
@@ -151,11 +226,7 @@ function setSlice(name) {
 
 // Called by the viewer after any view change, including a swap from a reference tile.
 function onViewChange() {
-  const { slice_type: type, main_plane: main } = ws.viewer.state();
-  for (const b of document.querySelectorAll("[data-slice]")) {
-    const on = b.dataset.slice === type || (type === "multiplanar" && b.dataset.slice === main);
-    b.setAttribute("aria-pressed", String(on));
-  }
+  syncControls();
   closeStaleCard();
 }
 
@@ -176,6 +247,7 @@ function viewState() {
     active_finding: ws.activeFinding,
     threshold: t / 100,
     threshold_pct: t,
+    focus: ws.focus,
     ...ws.viewer.state(),
     ...ws.viewer.sliceState(),
   };
@@ -464,22 +536,50 @@ function closeStaleCard() {
 // persona 4.25 controller: open() shows the panel, submitMessage(text) sends it as the user.
 function askChat() {
   if (!ws.chat) return notice("The chat is not available.");
+  toggleFocus(false); // the chat is hidden in focus mode
   ws.chat.open();
   if (!ws.chat.submitMessage(LOOK_QUESTION)) notice("The chat could not send right now; try again.");
 }
 
 // ---------- wiring ----------
 
+let sliderSource = null; // the slider whose input event is being handled, see dragging()
+
 function wireToolbar() {
   for (const b of document.querySelectorAll("[data-slice]")) b.addEventListener("click", () => setSlice(b.dataset.slice));
   for (const b of document.querySelectorAll("[data-window]")) b.addEventListener("click", () => setWindow(b.dataset.window));
-  $("mask-toggle").addEventListener("click", () => toggleMask());
-  $("mask-opacity").addEventListener("input", (e) => ws.viewer.setMaskOpacity(Number(e.target.value) / 100));
-  $("outline-toggle").addEventListener("click", (e) => {
-    const on = e.currentTarget.getAttribute("aria-pressed") !== "true";
-    e.currentTarget.setAttribute("aria-pressed", String(on));
-    ws.viewer.setOutline(on);
+  for (const b of document.querySelectorAll("[data-mask]")) b.addEventListener("click", () => toggleMask());
+  for (const b of document.querySelectorAll("[data-outline]")) b.addEventListener("click", () => setOutline());
+  for (const input of document.querySelectorAll("[data-mask-opacity]")) {
+    input.addEventListener("input", (e) => {
+      ws.viewer.setMaskOpacity(Number(e.target.value) / 100);
+      syncControls(e.target);
+    });
+  }
+  // Sliders apply on input; the viewer's onLight then updates the numbers.
+  const dragging = (handler) => (e) => {
+    sliderSource = e.target;
+    try {
+      handler(e);
+    } finally {
+      sliderSource = null;
+    }
+  };
+  $("ww").addEventListener("input", dragging((e) => setWindowLevel({ width: widthFromSlider(Number(e.target.value)), level: ws.viewer.state().window_hu.level })));
+  $("wl").addEventListener("input", dragging((e) => setWindowLevel({ width: ws.viewer.state().window_hu.width, level: Number(e.target.value) })));
+  $("gamma").addEventListener("input", dragging((e) => ws.viewer.setGamma(Number(e.target.value))));
+  $("invert").addEventListener("click", () => ws.viewer.setInvert(!ws.viewer.state().invert));
+  $("colormap").addEventListener("change", (e) => {
+    ws.viewer.setColormap(e.target.value);
+    e.target.blur(); // a focused select swallows the shortcuts
   });
+  $("light-reset").addEventListener("click", resetLight);
+  $("light-toggle").addEventListener("click", () => toggleLight());
+  $("light-close").addEventListener("click", () => toggleLight(false));
+  $("focus-toggle").addEventListener("click", () => toggleFocus());
+  $("zoom-in").addEventListener("click", () => ws.viewer.zoomBy(1));
+  $("zoom-out").addEventListener("click", () => ws.viewer.zoomBy(-1));
+  $("view-reset").addEventListener("click", () => ws.viewer.resetView());
   $("box-toggle").addEventListener("click", () => {
     if (!ws.activeOrgan) return notice("Select a finding or an organ first.");
     showScoringBox(ws.activeOrgan, !ws.boxOn);
@@ -493,11 +593,25 @@ function wireToolbar() {
   });
 }
 
-// Keys typed into a field or into the chat panel are not shortcuts.
+// Keys typed into a field or into the chat panel are not shortcuts. A slider is not a field.
 function typing(target) {
   if (!target.closest) return false;
-  if (target.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']")) return true;
+  if (target.closest("input:not([type=range]), textarea, select, [contenteditable=''], [contenteditable='true']")) return true;
   return Boolean(target.closest("[data-persona-root]") && !target.closest("#workspace-main"));
+}
+
+// In focus mode the toolbar and bottom bar float over the viewer; panels and notices start below
+// the toolbar, so the pane carries both bars' heights.
+function wireBars() {
+  const pane = document.querySelector(".viewer-pane");
+  const bottom = document.querySelector(".viewer-bottom");
+  const measure = () => {
+    pane.style.setProperty("--toolbar-h", `${$("viewer-toolbar").offsetHeight}px`);
+    pane.style.setProperty("--bottom-h", `${bottom.offsetHeight}px`);
+  };
+  const observer = new ResizeObserver(measure);
+  observer.observe($("viewer-toolbar"));
+  observer.observe(bottom);
 }
 
 function step(delta) {
@@ -520,7 +634,11 @@ function wireKeys() {
     else if (k === "]") setThreshold(ws.findings.state.threshold + 5);
     else if (k === "m") setSlice("multiplanar");
     else if (k === "w") showLookCard();
+    else if (k === "f") toggleFocus();
+    else if (k === "+" || k === "=") ws.viewer.zoomBy(1);
+    else if (k === "-") ws.viewer.zoomBy(-1);
     else if (k === "Escape" && !$("look-card").hidden) hideLookCard();
+    else if (k === "Escape" && ws.focus) toggleFocus(false);
     else return;
     e.preventDefault();
   });
@@ -554,17 +672,20 @@ async function main() {
       renderReadout(loc);
       closeStaleCard();
     },
-    onWindow: markWindow,
+    onLight: () => syncControls(sliderSource),
     onView: onViewChange,
   });
 
   renderScanBar(scan);
   wireToolbar();
   wireKeys();
+  wireBars();
+  syncControls();
 
   ws.chat = mountChat({ target: "#workspace-main", context: () => ({ scan_id: ws.scan.id, job_id: ws.job?.id ?? null }) });
-  const tools = await registerPageTools({ viewState, jumpToOrgan, selectFinding, setWindow, setThreshold, showScoringBox, toggleMask });
-  window.__radar = { viewState, selectFinding, jumpToOrgan, setWindow, setThreshold, showScoringBox, toggleMask, tools, viewer: ws.viewer };
+  const actions = { viewState, jumpToOrgan, selectFinding, setWindow, setWindowLevel, setThreshold, showScoringBox, toggleMask, toggleFocus, setZoom };
+  const tools = await registerPageTools(actions);
+  window.__radar = { ...actions, toggleLight, resetLight, tools, viewer: ws.viewer };
 
   if (scan.state !== "ready") {
     setJobStatus(scan.state === "rejected" ? `Rejected: ${scan.rejected_reason}` : "Upload not finished", "state-failed");

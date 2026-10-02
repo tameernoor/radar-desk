@@ -1,4 +1,4 @@
-// The seven WebMCP page tools. They only read or move the view.
+// The ten WebMCP page tools. They only read or move the view.
 import { WebMcpBridge } from "@runtypelabs/persona";
 import { ORGAN_COLOURS } from "./palette.js";
 
@@ -10,6 +10,9 @@ export const PAGE_TOOL_NAMES = [
   "set_threshold",
   "show_scoring_box",
   "toggle_mask",
+  "set_window_level",
+  "set_zoom",
+  "toggle_focus",
 ];
 
 const ORGANS = Object.keys(ORGAN_COLOURS);
@@ -27,7 +30,9 @@ function definitions(ctx) {
         "Also returns " +
         "the organs RADAR outlined on that slice with their share of the outlined pixels (largest first, and whether each is one of the 18 scored organs), " +
         "what is under the crosshair (mm, HU, mask label and organ), and the nearest outlined organ with its in-plane distance when the crosshair is on background. " +
-        "Also scan_id, job_id, active organ and finding, display threshold, window preset and whether the mask is shown.",
+        "Also scan_id, job_id, active organ and finding, display threshold, whether the mask is shown, the window (window_preset, or 'custom', " +
+        "and window_hu {min, max, width, level} in HU), gamma, invert and colormap of the CT, zoom (1 means the whole slice fits) and focus " +
+        "(true when the viewer fills the window and the chat is hidden).",
       inputSchema: { type: "object", properties: {} },
       execute: () => ctx.viewState(),
     },
@@ -56,6 +61,33 @@ function definitions(ctx) {
         required: ["preset"],
       },
       execute: ({ preset }) => ctx.setWindow(preset),
+    },
+    {
+      name: "set_window_level",
+      description: "Set the CT window by width and level in HU, for windows the four presets do not cover. Width 1 to 4000, level -1200 to 2000; values outside are clamped.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          width: { type: "number", minimum: 1, maximum: 4000, description: "Window width in HU, for example 400" },
+          level: { type: "number", minimum: -1200, maximum: 2000, description: "Window level (centre) in HU, for example 40" },
+        },
+        required: ["width", "level"],
+      },
+      execute: ({ width, level }) => ctx.setWindowLevel({ width, level }),
+    },
+    {
+      name: "set_zoom",
+      description:
+        "Zoom the 2D views, keeping the crosshair where it is on screen. 1 means the whole slice fits; 2 is twice as large; 0.25 to 16. " +
+        "To zoom in on an organ, call jump_to_organ first so the crosshair is on it, then set_zoom.",
+      inputSchema: { type: "object", properties: { zoom: { type: "number", minimum: 0.25, maximum: 16 } }, required: ["zoom"] },
+      execute: ({ zoom }) => ctx.setZoom(zoom),
+    },
+    {
+      name: "toggle_focus",
+      description: "Focus mode: the viewer fills the window and the findings list and this chat are hidden until the user presses Escape or f. Omit 'on' to toggle.",
+      inputSchema: { type: "object", properties: { on: { type: "boolean" } } },
+      execute: ({ on } = {}) => ctx.toggleFocus(on),
     },
     {
       name: "set_threshold",

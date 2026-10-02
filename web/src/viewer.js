@@ -1,16 +1,12 @@
-// NiiVue wrapper. The four NiiVue calls the app relies on (mm2frac, frac2mm,
+// NiiVue wrapper. The NiiVue calls the app relies on (mm2frac, frac2mm,
 // setColormapLabel, onLocationChange) are wrapped here so an upgrade touches one file.
-import { Niivue } from "@niivue/niivue";
+import { DRAG_MODE, Niivue } from "@niivue/niivue";
+import { LIGHT_DEFAULTS, lightReducer, nextZoom, presetFor, windowOf, WINDOWS, ZOOM_RANGE, zoomAround } from "./light.js";
 import { organRgb, UNSCORED_GREY } from "./palette.js";
 import { multiplanarLayout, PLANES, referencePlanes, routeEvent } from "./views.js";
 import { countSlice, invert4, mmToVoxel, nearestLabelled, organsOnSlice, planeAxis, voxelIndex, voxelSpacing } from "./slice.js";
 
-export const WINDOWS = {
-  soft_tissue: { label: "Soft tissue", min: -160, max: 240 },
-  liver: { label: "Liver", min: -20, max: 160 },
-  bone: { label: "Bone", min: -450, max: 1050 },
-  lung: { label: "Lung", min: -1350, max: 150 },
-};
+export { WINDOWS };
 
 const MAX_RAW_BYTES = 512 * 1024 * 1024;
 const DTYPE_BYTES = { uint8: 1, int8: 1, int16: 2, uint16: 2, int32: 4, uint32: 4, float32: 4, float64: 8 };
@@ -37,6 +33,18 @@ const DTYPE_BYTES = { uint8: 1, int8: 1, int16: 2, uint16: 2, int32: 4, uint32: 
 //     (src/niivue/interaction/EventController.ts 58-87) times uiData.dpr (index.ts 1271, 1285);
 //   - NiiVue registering its pointer listeners on the canvas in the bubbling phase
 //     (index.ts 2538-2560), so a capture listener on the canvas's parent runs first.
+// - Light (applyLight) uses the public setGamma (index.ts 7543), which sets the global
+//   cmapper.gamma; gamma only enters makeLut (colortables.ts 276-283), so label maps keep their
+//   colours. It writes volume.colormap (setter, nvimage/index.ts 789, which also resets cal_min and
+//   cal_max through calMinMax, ColormapManager.ts 23-29), volume.colormapInvert
+//   (nvimage/index.ts 43) and cal_min/cal_max, then calls updateGLVolume.
+// - Right-drag window/level: NiiVue sets cal_min/cal_max on the volume and then calls
+//   nv.onIntensityChange(volume) (index.ts 441, fired at 1578).
+// - Zoom and pan use the public setPan2Dxyzmm (index.ts 3855) and read nv.scene.pan2Dxyzmm back;
+//   yoke3Dto2DZoom (nvdocument.ts 153) makes the 3D render follow. Mouse buttons are mapped with
+//   the public setMouseEventConfig (index.ts 8746) and the DRAG_MODE enum (nvdocument.ts 75-86).
+// - Focus mode resizes the canvas's parent; NiiVue's own ResizeObserver on it (index.ts 921-924)
+//   resizes the canvas. resizeListener (index.ts 1188) is @internal and is not called.
 
 function mmToFrac(nv, mm) {
   return nv.mm2frac([mm[0], mm[1], mm[2]]);
@@ -69,7 +77,7 @@ export const tooBig = (scan) => rawBytes(scan) > MAX_RAW_BYTES;
 
 // ---------- viewer ----------
 
-export function createViewer(canvas, { onLocation, onWindow, onView } = {}) {
+export function createViewer(canvas, { onLocation, onLight, onView } = {}) {
   const nv = new Niivue({
     backColor: [0, 0, 0, 1],
     crosshairColor: [1, 0.85, 0.2, 0.9],
@@ -79,6 +87,14 @@ export function createViewer(canvas, { onLocation, onWindow, onView } = {}) {
     dragAndDropEnabled: false,
     loadingText: "Loading CT", // NiiVue's font has no ellipsis glyph
     viewModeHotKey: "", // the page owns the view type; NiiVue's own key would desync it
+    yoke3Dto2DZoom: true, // the 3D render follows the 2D zoom
+  });
+  // Plain left moves the crosshair, shift-left and middle pan, right-drag sets the window.
+  // Without this the middle button means contrast.
+  nv.setMouseEventConfig({
+    leftButton: { primary: DRAG_MODE.crosshair, withShift: DRAG_MODE.pan, withCtrl: DRAG_MODE.crosshair },
+    rightButton: DRAG_MODE.contrast,
+    centerButton: DRAG_MODE.pan,
   });
   // Nearest neighbour so label edges stay exact. NiiVue 0.69 only has a global
   // setting, so the CT is drawn nearest neighbour too.
@@ -94,7 +110,7 @@ export function createViewer(canvas, { onLocation, onWindow, onView } = {}) {
     maskOn: true,
     opacity: 0.45,
     outline: false,
-    window: "soft_tissue",
+    light: { ...LIGHT_DEFAULTS }, // CT window in HU, gamma, invert, colour map
     slice: "axial", // view type: axial, coronal, sagittal, multiplanar or render
     mainPlane: "axial", // in multiplanar, the big view; the other two planes are references
     layoutWide: null,
@@ -111,11 +127,33 @@ export function createViewer(canvas, { onLocation, onWindow, onView } = {}) {
     onLocation?.(api.location());
   });
 
-  // Right-drag window/level leaves the named presets behind.
-  nv.onIntensityChange = () => {
-    state.window = "custom";
-    onWindow?.("custom");
+  // Right-drag window/level: NiiVue has set the range on the volume; take it through the reducer
+  // so it is clamped like any other window.
+  nv.onIntensityChange = (volume) => {
+    if (volume !== state.ct) return;
+    light({ type: "window", min: volume.cal_min, max: volume.cal_max });
   };
+
+  // One reducer step, then one updateGLVolume (setGamma does its own).
+  function light(action) {
+    const before = state.light;
+    state.light = lightReducer(before, action);
+    applyLight(before);
+    onLight?.();
+  }
+
+  function applyLight(before = null) {
+    const ct = state.ct;
+    if (!ct) return;
+    const l = state.light;
+    // The colormap setter recomputes cal_min/cal_max (ColormapManager.ts 23-29), so it goes first.
+    if (ct.colormap !== l.colormap) ct.colormap = l.colormap;
+    ct.cal_min = l.min;
+    ct.cal_max = l.max;
+    ct.colormapInvert = l.invert;
+    if (!before || before.gamma !== l.gamma) nv.setGamma(l.gamma);
+    else nv.updateGLVolume();
+  }
 
   const ready = nv.attachToCanvas(canvas);
 
@@ -206,9 +244,21 @@ export function createViewer(canvas, { onLocation, onWindow, onView } = {}) {
     return { index, plane, x: point.clientX, y: point.clientY };
   }
 
+  // A trackpad pinch sends many small ctrl+wheel events, so deltas add up to one step per notch.
+  let wheelSum = 0;
+  function wheelZoom(e) {
+    const d = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY; // Firefox can report lines
+    if (Math.sign(d) !== Math.sign(wheelSum)) wheelSum = 0;
+    wheelSum += d;
+    if (Math.abs(wheelSum) < 50) return;
+    api.zoomBy(wheelSum < 0 ? 1 : -1);
+    wheelSum = 0;
+  }
+
   let press = null; // where the last press began, kept until the next one: {index, x, y, onMain}
   function route(e) {
-    if (e.target !== canvas || state.slice !== "multiplanar") return;
+    const withModifier = e.type === "wheel" && (e.ctrlKey || e.metaKey);
+    if (e.target !== canvas || (state.slice !== "multiplanar" && !withModifier)) return;
     const tile = tileAt(e);
     const type = e.type;
     if (type === "mousedown" || type === "touchstart") press = { index: tile.index, x: tile.x, y: tile.y, onMain: tile.plane === state.mainPlane };
@@ -226,11 +276,13 @@ export function createViewer(canvas, { onLocation, onWindow, onView } = {}) {
       eventType,
       button: e.button ?? 0,
       pressStartedOnMain: Boolean(press?.onMain),
+      withModifier,
     });
     if (action === "pass") return;
     e.stopPropagation();
     if (type === "wheel" || type === "contextmenu") e.preventDefault();
     if (action === "swap") api.setMainPlane(tile.plane);
+    if (action === "zoom") wheelZoom(e);
   }
   for (const type of ["mousedown", "mouseup", "click", "dblclick", "wheel", "contextmenu", "touchstart", "touchmove", "touchend"]) {
     canvas.parentElement.addEventListener(type, route, { capture: true, passive: false });
@@ -300,7 +352,7 @@ export function createViewer(canvas, { onLocation, onWindow, onView } = {}) {
       await ready;
       await nv.loadVolumes([{ url, colormap: "gray" }]);
       state.ct = nv.volumes[0];
-      api.setWindow(state.window);
+      applyLight();
       api.setSliceType(state.slice);
       state.crosshairMm = fracToMm(nv, nv.scene.crosshairPos);
       refreshLocation();
@@ -334,14 +386,42 @@ export function createViewer(canvas, { onLocation, onWindow, onView } = {}) {
     },
 
     setWindow(name) {
-      const w = WINDOWS[name];
-      if (!w) throw new Error(`Unknown window preset: ${name}`);
-      state.window = name;
-      onWindow?.(name);
-      if (!state.ct) return;
-      state.ct.cal_min = w.min;
-      state.ct.cal_max = w.max;
-      nv.updateGLVolume();
+      light({ type: "preset", name });
+    },
+
+    setWindowHU(min, max) {
+      light({ type: "window", min, max });
+    },
+
+    setGamma(value) {
+      light({ type: "gamma", value });
+    },
+
+    setInvert(on) {
+      light({ type: "invert", value: on });
+    },
+
+    setColormap(name) {
+      light({ type: "colormap", name });
+    },
+
+    resetLight() {
+      light({ type: "reset" });
+    },
+
+    // Zoom keeps the crosshair where it is on screen, as NiiVue's own wheel zoom does.
+    setZoom(zoom) {
+      if (!Number.isFinite(zoom)) throw new Error("Zoom must be a number.");
+      const z = Math.max(ZOOM_RANGE[0], Math.min(ZOOM_RANGE[1], zoom));
+      nv.setPan2Dxyzmm(zoomAround(Array.from(nv.scene.pan2Dxyzmm), z, fracToMm(nv, nv.scene.crosshairPos)));
+    },
+
+    zoomBy(direction) {
+      api.setZoom(nextZoom(nv.scene.pan2Dxyzmm[3], direction));
+    },
+
+    resetView() {
+      nv.setPan2Dxyzmm([0, 0, 0, 1]);
     },
 
     // A plane while in multiplanar picks the main view; otherwise it is the single view.
@@ -443,8 +523,16 @@ export function createViewer(canvas, { onLocation, onWindow, onView } = {}) {
 
     // Cheap: toggles and settings plus the last crosshair reading.
     state() {
+      const l = state.light;
+      const r1 = (v) => Math.round(v * 10) / 10;
+      const { width, level } = windowOf(l.min, l.max);
       return {
-        window_preset: state.window,
+        window_preset: presetFor(l.min, l.max),
+        window_hu: { min: r1(l.min), max: r1(l.max), width: r1(width), level: r1(level) },
+        gamma: l.gamma,
+        invert: l.invert,
+        colormap: l.colormap,
+        zoom: nv.scene.pan2Dxyzmm[3],
         slice_type: state.slice,
         main_plane: state.slice === "render" ? null : mainPlaneOf(),
         reference_planes: state.slice === "multiplanar" ? referencePlanes(state.mainPlane) : [],

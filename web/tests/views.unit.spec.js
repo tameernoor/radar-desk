@@ -42,6 +42,21 @@ test("a tile with no slice plane (tilePlane null) passes", () => {
   for (const eventType of EVENTS) expect(routeEvent({ ...base, tileIndex: 1, tilePlane: null, eventType })).toBe("pass");
 });
 
+test("a modifier wheel zooms everywhere but over a reference tile", () => {
+  const wheel = { ...base, eventType: "wheel", withModifier: true };
+  for (const mode of ["axial", "coronal", "sagittal", "render"]) expect(routeEvent({ ...wheel, mode })).toBe("zoom");
+  expect(routeEvent({ ...wheel, tilePlane: "axial", tileIndex: 0 })).toBe("zoom");
+  expect(routeEvent({ ...wheel, tileIndex: -1, tilePlane: null })).toBe("zoom");
+  expect(routeEvent(wheel)).toBe("block");
+  expect(routeEvent({ ...wheel, tilePlane: "sagittal", tileIndex: 2 })).toBe("block");
+  // Plain wheels are unchanged.
+  expect(routeEvent({ ...base, eventType: "wheel" })).toBe("block");
+  expect(routeEvent({ ...base, eventType: "wheel", tilePlane: "axial", tileIndex: 0 })).toBe("pass");
+  expect(routeEvent({ ...base, eventType: "wheel", mode: "axial" })).toBe("pass");
+  // The modifier means nothing for other events.
+  expect(routeEvent({ ...base, eventType: "mousedown", withModifier: true, tilePlane: "axial", tileIndex: 0 })).toBe("pass");
+});
+
 function overlaps(a, b) {
   const [ax, ay, aw, ah] = a.position;
   const [bx, by, bw, bh] = b.position;
