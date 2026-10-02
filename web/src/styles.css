@@ -59,8 +59,9 @@ input[type="checkbox"] { accent-color: var(--accent); }
   padding: 0.5rem 1rem; background: var(--panel); border-bottom: 1px solid var(--line);
 }
 .brand { font-weight: 600; color: var(--text); text-decoration: none; }
-.by { margin-left: -0.7rem; color: var(--muted); font-size: 0.85em; text-decoration: none; }
-.by:hover { color: var(--text); }
+.by { margin-left: -0.5rem; padding: 0.1rem 0.5rem; border: 1px solid var(--accent); border-radius: 999px;
+  color: var(--accent); font-size: 0.9em; font-weight: 600; text-decoration: none; }
+.by:hover { background: var(--accent); color: var(--bg); }
 .topbar nav { display: flex; gap: 0.9rem; }
 .topbar nav a { color: var(--muted); text-decoration: none; }
 .topbar nav a[aria-current="page"] { color: var(--text); }
