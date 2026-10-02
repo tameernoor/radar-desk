@@ -17,7 +17,6 @@ Importing this module defines objects only; nothing talks to Modal until deploy 
 from __future__ import annotations
 
 import csv
-import hashlib
 import io
 import json
 import os
@@ -34,6 +33,8 @@ HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
+from radar_worker.weights import check_weights  # shared with scripts/score_local.py
+
 APP_NAME = "radar-desk"
 WEIGHTS_VOLUME = "radar-weights"
 WEIGHTS_DIR = "/weights"
@@ -44,7 +45,6 @@ SMOKE_DIR = "/smoke"
 DATA_VOLUME = os.environ.get("MODAL_DATA_VOLUME", "radar-data")  # read at deploy time
 DATA_DIR = "/data"
 VOLUME_SCHEME = "volume://"
-CHECKPOINT = "checkpoint_radar_pretrain.pth"
 
 # name -> (file name, content type); the names match Result.artefacts
 ARTEFACTS = {
@@ -108,43 +108,6 @@ FUNCTION_OPTIONS = {
 
 
 # ---------------------------------------------------------------- weights
-
-
-def sha256_file(path, chunk: int = 8 << 20) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        while True:
-            block = fh.read(chunk)
-            if not block:
-                break
-            h.update(block)
-    return h.hexdigest()
-
-
-def check_weights(weights_dir: str, manifest: dict, hash_all: bool = False) -> dict:
-    """Compare files on disk with the manifest. Sizes always; sha256 of the checkpoint, or of all with hash_all."""
-    rows, problems = [], []
-    for entry in manifest["files"]:
-        path = Path(weights_dir) / entry["path"]
-        row = {"path": entry["path"], "expected_size": entry["size"], "expected_sha256": entry.get("sha256")}
-        if not path.is_file():
-            row.update(size=None, sha256=None, ok=False)
-            problems.append(f"{entry['path']}: missing")
-            rows.append(row)
-            continue
-        row["size"] = path.stat().st_size
-        ok = row["size"] == entry["size"]
-        if not ok:
-            problems.append(f"{entry['path']}: size {row['size']} != {entry['size']}")
-        if hash_all or entry["path"] == CHECKPOINT:
-            row["sha256"] = sha256_file(path)
-            if entry.get("sha256") and row["sha256"] != entry["sha256"]:
-                ok = False
-                problems.append(f"{entry['path']}: sha256 {row['sha256']} != {entry['sha256']}")
-        row["ok"] = ok
-        rows.append(row)
-    ckpt = next((r for r in rows if r["path"] == CHECKPOINT), {})
-    return {"ok": not problems, "problems": problems, "rows": rows, "checkpoint_sha256": ckpt.get("sha256")}
 
 
 _WEIGHTS_STATE: dict | None = None
@@ -261,7 +224,7 @@ def run_job(job_id: str, fetch_source, publish, artefact_keys: dict | None = Non
     state = weights_state(log)
     if not state["ok"]:
         return _error(job_id, "weights_mismatch", "; ".join(state["problems"]))
-    loaded = infer.load_model(WEIGHTS_DIR)
+    loaded = infer.load_model(WEIGHTS_DIR, device="cuda")
     timings["load_s"] = round(time.perf_counter() - t, 3)
 
     work = Path(tempfile.mkdtemp(prefix=f"radar-{job_id}-"))

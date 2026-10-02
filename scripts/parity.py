@@ -114,7 +114,7 @@ def compare(volume_path: str) -> dict:
 
     # 2. ours, same file, same container
     t = time.perf_counter()
-    loaded = infer.load_model(modal_app.WEIGHTS_DIR)
+    loaded = infer.load_model(modal_app.WEIGHTS_DIR, device="cuda")
     out = infer.score_file(str(scan), loaded, print)
     ours_s = time.perf_counter() - t
     if not out.get("ok"):

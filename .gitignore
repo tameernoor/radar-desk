@@ -19,3 +19,4 @@ web/.smoke-out/
 
 # Internal design notes
 docs/
+worker/.venv/

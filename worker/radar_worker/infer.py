@@ -1,6 +1,7 @@
 """RADAR inference that mirrors upstream `evaluate()` and keeps what it throws away.
 
-Runs only in the GPU container. `score_file` follows `DataFolder.__getitem__` and
+Runs on CUDA (the Modal container), Apple MPS or CPU, chosen by `RADAR_DEVICE`
+(auto | cuda | mps | cpu, default auto). `score_file` follows `DataFolder.__getitem__` and
 `evaluate()` in the vendored `RADAR_inference/inference_demo.py` step by step, with the same
 constants, and calls upstream's own `forward_test_win`, `center_crop`, `_get_scan_interval`,
 pad functions and MONAI's `dense_patch_slices`. On top it records the crop indices, the
@@ -13,7 +14,23 @@ Deviations from upstream, all outside the numeric path:
 - the text embeddings are loaded once from `weights_dir` instead of `../ckpt/` per call;
 - a file that is not LAS is reoriented to LAS first (upstream has no reorientation);
 - the unused intact-organ computation after stitching is left out (its result is never read);
-- input problems return {ok: false, error: input_error} where upstream would crash or skip.
+- input problems return {ok: false, error: input_error} where upstream would crash or skip;
+- every `.cuda()` and `torch.cuda.*` call is replaced by one `device`; `initialize()` is
+  reproduced line by line with `.to(device)` in place of `model.cuda()`;
+- the text embeddings were saved as cuda:0 tensors, so they are loaded with
+  map_location="cpu" and moved to the device (same values; upstream's plain torch.load
+  only works where CUDA exists);
+- off CUDA, the centred crop for an organ absent from the stitched mask is built explicitly
+  as the far corner that upstream's arithmetic gives on CUDA (see `far_corner_box`), because
+  the inf to int64 conversion it relies on differs on CPU and is undefined on MPS. On CUDA
+  upstream's `center_crop` is still called, as before.
+
+The vendored code itself is device-neutral on the paths used here: `masks_to_boxes_3d`
+builds its grids on `masks.device` (inference_demo.py lines 37 and 41-43), `forward_test_win`
+builds `intact_organ_ids` on `masks.device` (line 342) and takes the device from the
+segmentation output, `center_crop` only slices, and `VisionBranch.forward` moves its token
+flags to `x.device` (vision_branch.py lines 126-128). `forward_test_win` multiplies
+`image_feat @ text_feat.t()` (line 386), so the text embeddings must sit on the model's device.
 
 torch, monai and the vendored module are imported inside functions so this file parses
 and imports without them.
@@ -31,6 +48,7 @@ import nibabel as nib
 import numpy as np
 
 from . import geometry
+from .weights import CHECKPOINT
 
 DEFAULT_VENDOR_DIR = "/root/damo-radar/RADAR_inference"
 TEXT_EMBEDDINGS = "infer_text_embedding_radar.pt"
@@ -43,15 +61,146 @@ SW_BATCH_SIZE = 1
 OVERLAP = 0.25
 ROI_SIZE = (96, 256, 384)
 MAX_AXIS = 1000
+DEVICES = ("auto", "cuda", "mps", "cpu")
 
 _LOADED = None
+
+
+# ---------------------------------------------------------------- devices
+
+
+def _mps_available(torch) -> bool:
+    mps = getattr(getattr(torch, "backends", None), "mps", None)
+    return bool(mps is not None and mps.is_available())
+
+
+def resolve_device(name=None):
+    """torch.device for auto | cuda | mps | cpu (None reads RADAR_DEVICE, default auto).
+
+    auto picks cuda, then mps, then cpu. An explicit device that is not available raises
+    ValueError naming it.
+    """
+    import torch
+
+    if isinstance(name, torch.device):
+        return name
+    choice = str(name if name is not None else os.environ.get("RADAR_DEVICE", "auto")).strip().lower() or "auto"
+    if choice == "auto":
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        if _mps_available(torch):
+            return torch.device("mps")
+        return torch.device("cpu")
+    if choice == "cuda":
+        if not torch.cuda.is_available():
+            raise ValueError("RADAR_DEVICE is 'cuda' but torch reports no CUDA device")
+    elif choice == "mps":
+        if not _mps_available(torch):
+            raise ValueError("RADAR_DEVICE is 'mps' but torch reports MPS as unavailable")
+    elif choice != "cpu":
+        raise ValueError(f"RADAR_DEVICE {choice!r} is not one of {', '.join(DEVICES)}")
+    return torch.device(choice)
+
+
+def device_name(device) -> str:
+    """What `versions.gpu` reports: the CUDA card's name, "Apple MPS" or "cpu"."""
+    import torch
+
+    if device.type == "cuda":
+        return str(torch.cuda.get_device_name(device))
+    if device.type == "mps":
+        return "Apple MPS"
+    return "cpu"
+
+
+def peak_rss_bytes(ru_maxrss: int, platform: str | None = None) -> int:
+    """ru_maxrss in bytes: macOS reports bytes, Linux reports kilobytes."""
+    platform = sys.platform if platform is None else platform
+    return int(ru_maxrss) if platform == "darwin" else int(ru_maxrss) * 1024
+
+
+class MemoryTracker:
+    """Peak memory of one scan on any device.
+
+    cuda: torch's peak counters, reset at the start of the scan.
+    mps: torch has no peak counter, so the largest current value seen at each sample
+    (after every window and every centred crop) is kept.
+    cpu: the process's peak resident set size, a lifetime peak rather than a per-scan one.
+    """
+
+    def __init__(self, device):
+        self.device = device
+        self.mps_allocated = 0
+        self.mps_driver = 0
+
+    def start(self) -> None:
+        import torch
+
+        if self.device.type == "cuda":
+            torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats(self.device)
+        elif self.device.type == "mps":
+            mps = getattr(torch, "mps", None)
+            if hasattr(mps, "empty_cache"):
+                mps.empty_cache()
+            self.mps_allocated = 0
+            self.mps_driver = 0
+            self.sample()
+
+    def sample(self) -> None:
+        if self.device.type != "mps":
+            return
+        import torch
+
+        mps = getattr(torch, "mps", None)
+        if hasattr(mps, "current_allocated_memory"):
+            self.mps_allocated = max(self.mps_allocated, int(mps.current_allocated_memory()))
+        if hasattr(mps, "driver_allocated_memory"):
+            self.mps_driver = max(self.mps_driver, int(mps.driver_allocated_memory()))
+
+    def report(self) -> dict:
+        import torch
+
+        if self.device.type == "cuda":
+            return {"method": "torch.cuda peak counters, per scan",
+                    "peak_allocated_bytes": int(torch.cuda.max_memory_allocated(self.device)),
+                    "peak_reserved_bytes": int(torch.cuda.max_memory_reserved(self.device))}
+        if self.device.type == "mps":
+            self.sample()
+            return {"method": "largest torch.mps value seen after each window and crop, per scan",
+                    "peak_allocated_bytes": self.mps_allocated or None,
+                    "peak_driver_bytes": self.mps_driver or None}
+        try:
+            import resource
+        except ImportError:
+            return {"method": "unavailable on this platform", "peak_rss_bytes": None}
+        return {"method": "process peak RSS (ru_maxrss), lifetime not per scan",
+                "peak_rss_bytes": peak_rss_bytes(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)}
+
+
+def far_corner_box(image_shape, crop_size=ROI_SIZE) -> list:
+    """The crop upstream's `center_crop` gives on CUDA for an empty organ mask.
+
+    `masks_to_boxes_3d` returns +inf for every minimum and 0 for every maximum of an empty
+    mask. On CUDA `.long()` turns +inf into INT64_MAX, so each crop size stays at crop_size,
+    each centre is about 2**62, each end clips to the axis length and each start falls back
+    to end - crop_size. The result is the far (end) corner [[d-96, d], [h-256, h], [w-384, w]],
+    each start floored at 0. On CPU +inf converts to INT64_MIN instead and the same arithmetic
+    gives the origin corner; on MPS the conversion is undefined. Building the CUDA answer here
+    keeps every device in parity with the CUDA path.
+    """
+    d, h, w = (int(s) for s in image_shape[-3:])
+    return [[max(0, n - int(c)), n] for n, c in zip((d, h, w), crop_size)]
 
 
 class Loaded:
     """Everything `load_model` builds once per container."""
 
-    def __init__(self, upstream, pad_func, model, text_feat_dict, datafolder, weights_dir):
+    def __init__(self, upstream, pad_func, model, text_feat_dict, datafolder, weights_dir, device,
+                 load_state=None):
         self.upstream = upstream
+        self.device = device
+        self.load_state = load_state or {}
         self.pad_func = pad_func
         self.model = model
         self.text_feat_dict = text_feat_dict
@@ -71,10 +220,14 @@ class Loaded:
         return ["file_name"] + [f"{k} ({self.english_mapping[k]})" for k in self.test_items]
 
 
-def load_model(weights_dir: str) -> Loaded:
-    """Load RADAR once per process, the way upstream `initialize()` does, and cache it."""
+def load_model(weights_dir: str, device=None) -> Loaded:
+    """Load RADAR once per process, the way upstream `initialize()` does, on `device`, and cache it.
+
+    `device` is a torch.device or auto | cuda | mps | cpu; None reads RADAR_DEVICE.
+    """
     global _LOADED
-    if _LOADED is not None and _LOADED.weights_dir == weights_dir:
+    device = resolve_device(device)
+    if _LOADED is not None and _LOADED.weights_dir == weights_dir and str(_LOADED.device) == str(device):
         return _LOADED
     os.environ["MODEL_ROOT"] = weights_dir
     os.environ["CONFIGS_ROOT"] = weights_dir
@@ -85,15 +238,44 @@ def load_model(weights_dir: str) -> Loaded:
     import inference_demo as upstream  # reads MODEL_ROOT and CONFIGS_ROOT at import
     import torch
 
-    pad_func, model = upstream.initialize()
-    # upstream: torch.load('../ckpt/infer_text_embedding_radar.pt'), same call, absolute path
-    text_feat_dict = torch.load(os.path.join(weights_dir, TEXT_EMBEDDINGS))
+    # upstream initialize(), line for line, with .to(device) in place of model.cuda()
+    pad_func = upstream.transforms.DivisiblePadd(
+        keys=["image", "label"],
+        k=32,
+        mode='constant',
+        constant_values=0,
+        method="end"
+    )
+
+    vision_encoder = upstream.VisionBranch()
+    text_encoder = upstream.XBertEncoder.from_config({}, from_pretrained=True)
+
+    model = upstream.RADAR(
+        image_encoder=vision_encoder,
+        text_encoder=text_encoder,
+    )
+
+    ckpt_path = os.path.join(weights_dir, CHECKPOINT)  # upstream: os.path.join(model_root, ...)
+    ckpt = torch.load(ckpt_path, map_location='cpu', weights_only=False)
+
+    msg = model.load_state_dict(ckpt['model'], strict=False)
+    del ckpt
+
+    model.eval()
+    model.to(device)
+
+    # upstream: torch.load('../ckpt/infer_text_embedding_radar.pt'). The tensors were saved on
+    # cuda:0, so load them on the CPU and move them to the model's device (forward_test_win
+    # line 386 multiplies them with image features on that device).
+    raw = torch.load(os.path.join(weights_dir, TEXT_EMBEDDINGS), map_location="cpu")
+    text_feat_dict = {k: v.to(device) for k, v in raw.items()}
+    load_state = {"missing_keys": len(msg.missing_keys), "unexpected_keys": len(msg.unexpected_keys)}
     empty = tempfile.mkdtemp(prefix="radar-catalog-")
     try:
         datafolder = upstream.DataFolder(empty)
     finally:
         shutil.rmtree(empty, ignore_errors=True)
-    _LOADED = Loaded(upstream, pad_func, model, text_feat_dict, datafolder, weights_dir)
+    _LOADED = Loaded(upstream, pad_func, model, text_feat_dict, datafolder, weights_dir, device, load_state)
     return _LOADED
 
 
@@ -298,6 +480,7 @@ def _evaluate(image, loaded: Loaded, plan: geometry.Plan, log) -> dict:
     from monai.data.utils import dense_patch_slices
 
     up = loaded.upstream
+    device = loaded.device
     model = loaded.model
     pad_func = loaded.pad_func
     text_feat_dict = loaded.text_feat_dict
@@ -308,11 +491,11 @@ def _evaluate(image, loaded: Loaded, plan: geometry.Plan, log) -> dict:
     overlap = OVERLAP
     roi_size = ROI_SIZE
 
-    torch.cuda.empty_cache()
-    torch.cuda.reset_peak_memory_stats()  # so the trace's peak is this scan's
+    memory = MemoryTracker(device)
+    memory.start()  # upstream: torch.cuda.empty_cache(); the peak counters also restart here
     organ_feat_dict = {}
 
-    image = image[None].cuda()
+    image = image[None].to(device)
 
     image_size = list(image.shape[2:])
     num_spatial_dims = len(image.shape) - 2
@@ -327,8 +510,8 @@ def _evaluate(image, loaded: Loaded, plan: geometry.Plan, log) -> dict:
     organ_logits = dict(zip(test_items, [[] for _ in test_items]))
 
     # get full mask
-    full_mask = torch.zeros((1, 37) + tuple(image_size)).cuda()
-    count_map = torch.zeros_like(full_mask).cuda()
+    full_mask = torch.zeros((1, 37) + tuple(image_size)).to(device)
+    count_map = torch.zeros_like(full_mask).to(device)
 
     source = {}            # organ_zh -> {"how": "window", "window_index": i} or {"how": "centered_crop", ...}
     window_scored = []     # per window, the organs scored in it
@@ -340,7 +523,7 @@ def _evaluate(image, loaded: Loaded, plan: geometry.Plan, log) -> dict:
             for idx in slice_range
         ]
 
-        window_patches = torch.cat([image[win_slice] for win_slice in unravel_slice]).cuda()
+        window_patches = torch.cat([image[win_slice] for win_slice in unravel_slice]).to(device)
 
         before = set(organ_feat_dict)
         organ_logits, pred_window_seg_prob = model.forward_test_win(
@@ -352,6 +535,7 @@ def _evaluate(image, loaded: Loaded, plan: geometry.Plan, log) -> dict:
             organ_feat_dict,
             None
         )
+        memory.sample()
         new = [k for k in organ_feat_dict if k not in before]
         for name in new:
             source[name] = {"how": "window", "window_index": slice_g}
@@ -379,18 +563,24 @@ def _evaluate(image, loaded: Loaded, plan: geometry.Plan, log) -> dict:
             organ_name = k.split('_')[0]
             organ_id = loaded.datafolder.organs.index(organ_name)
 
-            # An organ absent from the stitched mask gets an inf box from masks_to_boxes_3d. On CUDA
-            # inf converts to INT64_MAX, so the crop lands in the far (end) corner of the padded image;
-            # on CPU it would convert differently and land in the origin corner. The wrapper must
-            # therefore run on CUDA, as upstream does, for its crops to match.
             organ_mask = torch.eq(stitched_mask, organ_id + 1)
             present = bool(organ_mask.any().item())
-            box = _center_crop_box(up.masks_to_boxes_3d, image, organ_mask, roi_size)
-            window_patch, window_mask = up.center_crop(
-                image,
-                organ_mask,
-                crop_size=roi_size
-            )
+            if present or device.type == "cuda":
+                box = _center_crop_box(up.masks_to_boxes_3d, image, organ_mask, roi_size)
+                window_patch, window_mask = up.center_crop(
+                    image,
+                    organ_mask,
+                    crop_size=roi_size
+                )
+            else:
+                # An organ absent from the stitched mask, off CUDA: upstream's center_crop lands in
+                # the far (end) corner on CUDA, where inf converts to INT64_MAX; on CPU it would be
+                # the origin corner and on MPS undefined. Build the CUDA crop explicitly, sliced the
+                # way center_crop slices, so every device matches the CUDA path.
+                box = far_corner_box(image.shape, roi_size)
+                (z0, z1), (y0, y1), (x0, x1) = box
+                window_patch = image[..., z0:z1, y0:y1, x0:x1]
+                window_mask = organ_mask[..., z0:z1, y0:y1, x0:x1]
             got = [int(s) for s in window_patch.shape[-3:]]
             assert got == [b - a for a, b in box], (got, box)
             window_mask = window_mask.float()
@@ -410,6 +600,7 @@ def _evaluate(image, loaded: Loaded, plan: geometry.Plan, log) -> dict:
                 None,
                 skip_organ=organ_id
             )
+            memory.sample()
             new = [n for n in organ_feat_dict if n not in before]
             crop_index = len(crops)
             for name in new:
@@ -419,7 +610,7 @@ def _evaluate(image, loaded: Loaded, plan: geometry.Plan, log) -> dict:
                 "for_item": k,
                 "for_organ_zh": organ_name,
                 "label": organ_id + 1,
-                "absent": not present,  # crop in the far corner on CUDA, see above
+                "absent": not present,  # far-corner crop, see far_corner_box
                 "box": box,
                 "padded_shape": [int(s) for s in window_patch.shape[-3:]],
                 "scored_zh": new,
@@ -434,7 +625,6 @@ def _evaluate(image, loaded: Loaded, plan: geometry.Plan, log) -> dict:
         else:
             scores[item] = None
 
-    peak = int(torch.cuda.max_memory_allocated()) if torch.cuda.is_available() else None
     return {
         "scores": scores,
         "raw_probs": probs,
@@ -443,7 +633,10 @@ def _evaluate(image, loaded: Loaded, plan: geometry.Plan, log) -> dict:
         "crops": crops,
         "source": source,
         "stitched_mask": stitched_mask[0, 0].to(torch.uint8).cpu().numpy(),
-        "peak_gpu_bytes": peak,
+        "device": device.type,
+        "device_str": str(device),
+        "device_name": device_name(device),
+        "memory": memory.report(),
     }
 
 
@@ -503,7 +696,12 @@ def _assemble(out: dict, plan: geometry.Plan, affine, stats_all: dict, loaded: L
         "organs": per_organ,
         "organ_stats_all": stats_all,
         "raw_probs": out["raw_probs"],
-        "peak_gpu_bytes": out["peak_gpu_bytes"],
+        "peak_gpu_bytes": out["memory"].get("peak_allocated_bytes") if out["device"] == "cuda" else None,
+        "device": out["device"],
+        "device_str": out["device_str"],
+        "device_name": out["device_name"],
+        "memory": out["memory"],
+        "load_state": loaded.load_state,
     }
     return {
         "ok": True,
