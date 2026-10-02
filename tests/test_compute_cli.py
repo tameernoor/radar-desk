@@ -14,7 +14,7 @@ OWNER = "owner-secret-1"
 ENV = f"# radar desk\nOWNER_TOKEN={OWNER}\nGPU_BACKEND=fake\nLAST=1"
 POD = {"id": "pod_ab12", "runpod_id": "rp123", "phase": "ready", "gpu": "NVIDIA L4", "image": "ghcr.io/x/radar-worker:0.1",
        "cost_per_hr": 0.39, "created_at": "x", "started_at": "x", "ready_at": "x", "up_s": 754, "idle_s": 30,
-       "stops_in_s": 570, "worker_id": "runpod-abc123", "tunnel_url": "https://a-b.trycloudflare.com",
+       "idle_delete_s": 600, "worker_id": "runpod-abc123", "tunnel_url": "https://a-b.trycloudflare.com",
        "tunnel_alive": True, "job_id": None}
 
 
@@ -30,8 +30,9 @@ class FakeApp:
     def body(self) -> dict:
         return {"mode": self.mode, "changeable": True, "changed_at": None, "tunnel_mode": "managed",
                 "public_url": None,
-                "runpod": {"configured": True, "datacenter": "EU-RO-1", "idle_min": 10, "max_pod_hours": 3,
-                           "gpus": ["NVIDIA L4", "NVIDIA GeForce RTX 4090"]},
+                "runpod": {"configured": True, "datacenter": "EU-RO-1", "max_pod_hours": 3,
+                           "gpus": ["NVIDIA L4", "NVIDIA GeForce RTX 4090"], "idle_delete_s": 600,
+                           "app_lost_delete_s": 600},
                 "pod": self.pod, "in_flight": None, "queued": 0, "held": [], "problem": self.problem,
                 "last_event": None, "spend_month_usd": 1.234, "budget_usd": 10.0, "month": "2026-10"}
 

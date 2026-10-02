@@ -12,7 +12,7 @@ from test_compute_service import OWNER, World
 FIELDS = {"mode", "changeable", "changed_at", "tunnel_mode", "public_url", "runpod", "pod", "in_flight",
           "queued", "held", "problem", "last_event", "spend_month_usd", "budget_usd", "month"}
 POD_FIELDS = {"id", "runpod_id", "phase", "gpu", "image", "cost_per_hr", "created_at", "started_at",
-              "ready_at", "up_s", "idle_s", "stops_in_s", "worker_id", "tunnel_url", "tunnel_alive", "job_id"}
+              "ready_at", "up_s", "idle_s", "idle_delete_s", "worker_id", "tunnel_url", "tunnel_alive", "job_id"}
 
 
 def clients(svc) -> tuple[TestClient, TestClient]:
@@ -30,8 +30,9 @@ def test_compute_routes(world):
     body = owner.get("/compute").json()
     assert set(body) == FIELDS
     assert body["mode"] == "worker" and body["changeable"] is True and body["tunnel_mode"] == "managed"
-    assert body["runpod"] == {"configured": True, "datacenter": "EU-RO-1", "idle_min": 10, "max_pod_hours": 3,
-                              "gpus": ["NVIDIA L4", "NVIDIA GeForce RTX 4090"]}
+    assert body["runpod"] == {"configured": True, "datacenter": "EU-RO-1", "max_pod_hours": 3,
+                              "gpus": ["NVIDIA L4", "NVIDIA GeForce RTX 4090"], "idle_delete_s": 600,
+                              "app_lost_delete_s": 600}
     assert body["pod"] is None and body["queued"] == 0 and body["month"] == "2026-10"
 
     r = owner.put("/compute", json={"mode": "modal"})

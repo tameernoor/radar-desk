@@ -12,8 +12,8 @@ ENV_NAMES = [
     "RADAR_GPU", "MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET", "LLM_PROVIDER", "LLM_API_KEY", "LLM_BASE_URL", "DATA_DIR", "CHAT_MODEL",
     "STORAGE_BACKEND", "MODAL_DATA_VOLUME", "S3_BUCKET", "WORKER_LEASE_S",
     "WORKER_IMAGE", "WORKER_PUBLIC_URL", "WORKER_TUNNEL", "RUNPOD_API_KEY", "RUNPOD_VOLUME_ID",
-    "RUNPOD_REGISTRY_AUTH_ID", "RUNPOD_DATACENTER", "RUNPOD_IDLE_MIN", "RUNPOD_MAX_POD_HOURS",
-    "RUNPOD_START_TIMEOUT_S", "RUNPOD_GPUS",
+    "RUNPOD_REGISTRY_AUTH_ID", "RUNPOD_DATACENTER", "RUNPOD_MAX_POD_HOURS",
+    "RUNPOD_START_TIMEOUT_S", "RUNPOD_GPUS", "RADAR_POD_IDLE_DELETE_S", "RADAR_POD_APP_LOST_DELETE_S",
 ]
 
 
@@ -192,8 +192,11 @@ def test_tunnel_mode_contradictions_are_config_errors(monkeypatch):
 def test_runpod_settings_and_defaults(monkeypatch):
     s = _settings()
     assert s.worker_image is None and not s.runpod_configured
-    assert (s.runpod_datacenter, s.runpod_idle_min, s.runpod_max_pod_hours, s.runpod_start_timeout_s) == (
-        "EU-RO-1", 10, 3, 600)
+    assert (s.runpod_datacenter, s.runpod_max_pod_hours, s.runpod_start_timeout_s) == ("EU-RO-1", 3, 600)
+    assert (s.radar_pod_idle_delete_s, s.radar_pod_app_lost_delete_s) == (600, 600)
+    for bad in (0, 0.5):
+        with pytest.raises(ValueError):
+            _settings(radar_pod_idle_delete_s=bad)
     monkeypatch.setenv("RUNPOD_API_KEY", "rp-secret-7777")
     full = _settings(runpod_volume_id="v", runpod_registry_auth_id="r", worker_image="img")
     assert full.runpod_configured and "rp-secret-7777" not in repr(full)

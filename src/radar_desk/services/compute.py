@@ -2,8 +2,10 @@
 
 The mode, `modal` or `worker`, lives in the database and is seeded once from GPU_BACKEND; the fake backend
 is fixed at start-up. In mode worker with RunPod configured, `tick` starts one pod when work is queued and
-moves its row through `tunnel`, `starting` and `ready`, and stops it when idle, at the hour cap, or when
-something under it fails. A pod is deleted on RunPod before its row is closed.
+moves its row through `tunnel`, `starting` and `ready`, and stops it at the hour cap, when the mode is no
+longer worker, or when something under it fails. An idle pod deletes itself (RADAR_POD_IDLE_DELETE_S, passed
+to the pod), and the next reconcile closes its row as vanished. A pod the app stops is deleted on RunPod before
+its row is closed.
 """
 
 from __future__ import annotations
@@ -160,9 +162,6 @@ class ComputeService:
         return mode == "worker" and any(
             j.hold_reason is None for j in self.db.list_jobs(state="queued", limit=ALL))
 
-    def _idle_limit_s(self, mode: str) -> float:
-        return self.settings.runpod_idle_min * 60 if mode == "worker" else 0.0
-
     def _tunnel_alive(self, pod: PodRecord) -> bool:
         return bool(self.tunnel.alive(pod.tunnel.get("pid"), pod.tunnel.get("binary")))
 
@@ -173,12 +172,8 @@ class ComputeService:
             pod = self.db.open_pod()
             if pod is None:
                 return None
-            mode = self.mode
             started, ready = _ts(pod.started_at), _ts(pod.ready_at)
             idle_s = max(0, int(now - max(ready, self._last_finished()))) if ready is not None else None
-            stops_in_s = None
-            if idle_s is not None and not self._waiting(mode):
-                stops_in_s = max(0, int(self._idle_limit_s(mode) - idle_s))
             tunnel_alive = None
             if self.settings.tunnel_mode == "managed":
                 tunnel_alive = bool(pod.tunnel) and self._tunnel_alive(pod)
@@ -189,7 +184,7 @@ class ComputeService:
                 "image": pod.image,
                 "cost_per_hr": pod.cost_per_hr, "created_at": pod.created_at, "started_at": pod.started_at,
                 "ready_at": pod.ready_at, "up_s": max(0, int(now - started)) if started is not None else None,
-                "idle_s": idle_s, "stops_in_s": stops_in_s, "worker_id": pod.worker_id,
+                "idle_s": idle_s, "idle_delete_s": self.settings.radar_pod_idle_delete_s, "worker_id": pod.worker_id,
                 "tunnel_url": pod.tunnel_url, "tunnel_alive": tunnel_alive, "job_id": job.id if job else None,
             }
 
@@ -209,8 +204,9 @@ class ComputeService:
                 "tunnel_mode": s.tunnel_mode,
                 "public_url": s.worker_public_url,
                 "runpod": {"configured": self.configured(), "datacenter": s.runpod_datacenter,
-                           "idle_min": s.runpod_idle_min, "max_pod_hours": s.runpod_max_pod_hours,
-                           "gpus": s.runpod_gpu_list},
+                           "max_pod_hours": s.runpod_max_pod_hours, "gpus": s.runpod_gpu_list,
+                           "idle_delete_s": s.radar_pod_idle_delete_s,
+                           "app_lost_delete_s": s.radar_pod_app_lost_delete_s},
                 "pod": self.pod_view(now),
                 "in_flight": ({"job_id": in_flight.id, "backend": job_backend(in_flight)}
                               if in_flight else None),
@@ -342,7 +338,8 @@ class ComputeService:
         """One pass of the pod rules, in order: reconcile, tunnel health, tunnel, starting, stop, start.
 
         Reconciling runs in every mode, so a lost pod is deleted even after a switch to modal; only new
-        starts need RunPod fully configured.
+        starts need RunPod fully configured. In mode worker the app never stops a pod for idling; the pod
+        deletes itself and the reconcile then closes its row as vanished.
         """
         now = self.clock() if now is None else now
         with self._lock:
@@ -418,19 +415,16 @@ class ComputeService:
                         return
                     pod = None
 
-            # 5. The hour cap, then idle (at once when the mode is no longer worker).
+            # 5. The hour cap, then, when the mode is no longer worker and nothing waits, at once.
             if pod is not None and pod.phase in ("starting", "ready"):
-                started = parse_iso(pod.started_at)
-                if now - started >= self.settings.runpod_max_pod_hours * 3600:
+                if now - parse_iso(pod.started_at) >= self.settings.runpod_max_pod_hours * 3600:
                     if not self._stop(pod, "cap", now):
                         return
                     pod = None
-                elif not self._waiting(mode):
-                    since = max(_ts(pod.ready_at) or started, self._last_finished())
-                    if now - since >= self._idle_limit_s(mode):
-                        if not self._stop(pod, "idle" if mode == "worker" else "mode", now):
-                            return
-                        pod = None
+                elif mode != "worker" and not self._waiting(mode):
+                    if not self._stop(pod, "mode", now):
+                        return
+                    pod = None
 
             # 6. Start a pod when work waits or the owner asked.
             if (pod is None and mode == "worker" and configured and now >= self._get_float("next_start_at")
@@ -493,7 +487,9 @@ class ComputeService:
         spec = PodSpec(image=s.worker_image, registry_auth_id=s.runpod_registry_auth_id,
                        datacenter=s.runpod_datacenter, volume_id=s.runpod_volume_id,
                        env={"RADAR_DESK_URL": pod.tunnel_url, "RADAR_WORKER_TOKEN": plaintext,
-                            "RADAR_WORKER_ID": pod.worker_id, "RADAR_IMAGE": s.worker_image})
+                            "RADAR_WORKER_ID": pod.worker_id, "RADAR_IMAGE": s.worker_image,
+                            "RADAR_POD_IDLE_DELETE_S": str(int(s.radar_pod_idle_delete_s)),
+                            "RADAR_POD_APP_LOST_DELETE_S": str(int(s.radar_pod_app_lost_delete_s))})
         try:
             deployed = self.runpod.deploy(spec, gpus=s.runpod_gpu_list, attempts=1)
         except Exception as exc:  # noqa: BLE001 - a malformed answer too; the token must not outlive it

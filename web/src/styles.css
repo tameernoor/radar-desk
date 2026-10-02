@@ -59,6 +59,8 @@ input[type="checkbox"] { accent-color: var(--accent); }
   padding: 0.5rem 1rem; background: var(--panel); border-bottom: 1px solid var(--line);
 }
 .brand { font-weight: 600; color: var(--text); text-decoration: none; }
+.by { margin-left: -0.7rem; color: var(--muted); font-size: 0.85em; text-decoration: none; }
+.by:hover { color: var(--text); }
 .topbar nav { display: flex; gap: 0.9rem; }
 .topbar nav a { color: var(--muted); text-decoration: none; }
 .topbar nav a[aria-current="page"] { color: var(--text); }
