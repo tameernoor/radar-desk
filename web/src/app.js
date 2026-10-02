@@ -1,5 +1,6 @@
 import "./styles.css";
 import { ApiError, del, get, post } from "./api.js";
+import { computePhrase, fromGpuStatus } from "./compute.js";
 import { wireLogout } from "./login.js";
 import { bytes, dims, el, elapsed, scanChip, shortId, spacing, usd, when } from "./format.js";
 
@@ -97,8 +98,8 @@ function scanName(scanId) {
 function gpuPhrase(g) {
   const queued = scans.filter((s) => s.latest_job?.state === "queued").length;
   const price = g.price_per_hour_usd != null ? ` at $${g.price_per_hour_usd.toFixed(2)}/h` : "";
-  const backend = { fake: "Fake GPU", modal: "Modal", worker: "Worker" }[g.backend] || g.backend;
-  const gpu = g.in_flight?.gpu_used || (g.backend === "worker" ? "worker" : g.gpu_requested.join(" or "));
+  const backend = { fake: "Fake GPU", modal: "Modal" }[g.backend] || g.backend;
+  const gpu = g.in_flight?.gpu_used || g.gpu_requested.join(" or ");
   const budgetHeld = g.held.find((j) => j.hold_reason === "budget");
   if (budgetHeld) return `Held: monthly GPU budget reached, raise or wait. ${g.held.length} job(s) held.`;
   if (g.in_flight) {
@@ -110,7 +111,6 @@ function gpuPhrase(g) {
     return `Held: ${g.held.length} job(s) waiting (${reasons}), the poller retries.`;
   }
   if (queued) return `${backend}: ${queued} job(s) queued, nothing on the GPU yet`;
-  if (g.backend === "worker") return "GPU idle, nothing queued (worker backend)";
   return `GPU idle, nothing queued (${backend === "Modal" ? `Modal, ${gpu}` : "fake backend"})`;
 }
 
@@ -119,9 +119,11 @@ async function pollGpu() {
   try {
     const g = await get("/gpu/status");
     const spend = `Spent ${usd(g.spend_month_usd)} of ${usd(g.budget_usd)} in ${g.month}.`;
-    strip.replaceChildren(el("strong", {}, gpuPhrase(g)), " ", el("span", { class: "muted" }, spend));
-    strip.classList.toggle("busy", Boolean(g.in_flight));
-    strip.classList.toggle("held", g.held.length > 0);
+    // Worker mode, or a pod still draining after a switch, uses the same phrase as the jobs page.
+    const c = g.pod || g.compute_mode === "worker" ? computePhrase(fromGpuStatus(g, scanName), Date.now()) : null;
+    strip.replaceChildren(el("strong", {}, c ? c.text : gpuPhrase(g)), " ", el("span", { class: "muted" }, spend));
+    strip.classList.toggle("busy", c ? c.tone === "busy" : Boolean(g.in_flight));
+    strip.classList.toggle("held", c ? c.tone === "held" || c.tone === "problem" : g.held.length > 0);
   } catch (e) {
     if (!(e instanceof ApiError && e.status === 401)) strip.textContent = `GPU status unavailable: ${e.message}`;
   }

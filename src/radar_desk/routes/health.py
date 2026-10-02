@@ -18,4 +18,4 @@ except PackageNotFoundError:
 
 @router.get("/health")
 def health(svc: Svc) -> dict:
-    return {"ok": True, "backend": svc.backend.name, "version": VERSION}
+    return {"ok": True, "backend": svc.compute.mode, "version": VERSION}

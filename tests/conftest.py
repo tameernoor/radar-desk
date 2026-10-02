@@ -23,12 +23,15 @@ FIXTURE_FILES = {
 
 
 LLM_ENV = ("LLM_PROVIDER", "LLM_BASE_URL", "LLM_API_KEY", "CHAT_MODEL")
+COMPUTE_ENV = ("WORKER_IMAGE", "WORKER_PUBLIC_URL", "WORKER_TUNNEL", "RUNPOD_API_KEY", "RUNPOD_VOLUME_ID",
+               "RUNPOD_REGISTRY_AUTH_ID", "RUNPOD_DATACENTER", "RUNPOD_IDLE_MIN", "RUNPOD_MAX_POD_HOURS",
+               "RUNPOD_START_TIMEOUT_S")
 
 
 @pytest.fixture(autouse=True)
 def no_llm_env(monkeypatch):
-    """A developer's shell settings must not make a test configure chat and run a real provider check."""
-    for name in LLM_ENV:
+    """A developer's shell settings must not make a test configure chat or RunPod and call a real service."""
+    for name in LLM_ENV + COMPUTE_ENV:
         monkeypatch.delenv(name, raising=False)
 
 

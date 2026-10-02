@@ -1,4 +1,4 @@
-"""The app's own API as the compute switch needs it: health and the owner's worker routes."""
+"""The app's own API as the compute command needs it: health, the Compute choice and the workers."""
 
 from __future__ import annotations
 
@@ -6,7 +6,11 @@ import httpx
 
 
 class DeskError(RuntimeError):
-    """The app answered an owner call with an unexpected status."""
+    """The app answered an owner call with a status other than 2xx; the message is the app's detail."""
+
+    def __init__(self, status: int, detail: str) -> None:
+        super().__init__(detail)
+        self.status = status
 
 
 class Desk:
@@ -15,9 +19,16 @@ class Desk:
         self.owner_token = owner_token
         self.client = client or httpx.Client(timeout=10)
 
-    def _owner(self, method: str, path: str, **kwargs) -> httpx.Response:
+    def _owner(self, method: str, path: str, **kwargs) -> dict:
         headers = {"Authorization": f"Bearer {self.owner_token}"}
-        return self.client.request(method, self.base + path, headers=headers, **kwargs)
+        r = self.client.request(method, self.base + path, headers=headers, **kwargs)
+        if not r.is_success:
+            try:
+                detail = r.json()["detail"]
+            except (ValueError, KeyError, TypeError):
+                detail = None
+            raise DeskError(r.status_code, str(detail) if detail else f"{method} {path} answered {r.status_code}")
+        return r.json()
 
     def health(self) -> dict | None:
         """GET /health, or None when the app does not answer it."""
@@ -27,25 +38,17 @@ class Desk:
         except (httpx.HTTPError, ValueError):
             return None
 
-    def create_token(self, name: str) -> tuple[str, str]:
-        """A new worker token's id and plaintext."""
-        r = self._owner("POST", "/workers/tokens", json={"name": name})
-        if r.status_code != 201:
-            raise DeskError(f"POST /workers/tokens answered {r.status_code}")
-        body = r.json()
-        return body["id"], body["token"]
-
-    def revoke_token(self, token_id: str) -> bool:
-        """Revoke a token; False when the app does not know it."""
-        r = self._owner("DELETE", f"/workers/tokens/{token_id}")
-        if r.status_code == 404:
-            return False
-        if r.status_code != 204:
-            raise DeskError(f"DELETE /workers/tokens/{token_id} answered {r.status_code}")
-        return True
-
     def workers(self) -> list[dict]:
-        r = self._owner("GET", "/workers")
-        if r.status_code != 200:
-            raise DeskError(f"GET /workers answered {r.status_code}")
-        return r.json()["workers"]
+        return self._owner("GET", "/workers")["workers"]
+
+    def compute(self) -> dict:
+        return self._owner("GET", "/compute")
+
+    def set_mode(self, mode: str) -> dict:
+        return self._owner("PUT", "/compute", json={"mode": mode})
+
+    def pod_start(self) -> dict:
+        return self._owner("POST", "/compute/pod/start")
+
+    def pod_stop(self) -> dict:
+        return self._owner("POST", "/compute/pod/stop")

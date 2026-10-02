@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import Field, SecretStr, ValidationError
+from pydantic import Field, SecretStr, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_GPU_PRICES_USD_PER_S: dict[str, float] = {
@@ -64,7 +64,18 @@ class Settings(BaseSettings):
     gpu_poll_interval_s: float = 10.0
     gpu_prices_usd_per_s: dict[str, float] = Field(default_factory=lambda: dict(DEFAULT_GPU_PRICES_USD_PER_S))
     worker_lease_s: int = Field(default=120, ge=10)
-    worker_image: str = "radar-worker"
+    worker_image: str | None = None
+
+    # RunPod pods started by the app (plan.md, Compute switch B)
+    worker_public_url: str | None = None
+    worker_tunnel: Literal["managed", "external"] | None = None  # None means inferred from WORKER_PUBLIC_URL
+    runpod_api_key: SecretStr | None = None
+    runpod_volume_id: str | None = None
+    runpod_registry_auth_id: str | None = None
+    runpod_datacenter: str = "EU-RO-1"
+    runpod_idle_min: float = 10
+    runpod_max_pod_hours: float = 3
+    runpod_start_timeout_s: float = 600
 
     llm_api_key: SecretStr | None = None
     llm_provider: Literal["openrouter", "ollama", "openai"] | None = None  # None means inferred from the URL
@@ -72,6 +83,25 @@ class Settings(BaseSettings):
     chat_model: str | None = None
 
     max_upload_bytes: int = 314_572_800
+
+    @model_validator(mode="after")
+    def _tunnel_matches_url(self) -> Settings:
+        if self.worker_tunnel == "external" and not self.worker_public_url:
+            raise ValueError("WORKER_TUNNEL=external needs WORKER_PUBLIC_URL")
+        if self.worker_tunnel == "managed" and self.worker_public_url:
+            raise ValueError("WORKER_TUNNEL=managed starts its own tunnel; unset WORKER_PUBLIC_URL")
+        return self
+
+    @property
+    def tunnel_mode(self) -> str:
+        """WORKER_TUNNEL when set, else external with WORKER_PUBLIC_URL and managed without."""
+        return self.worker_tunnel or ("external" if self.worker_public_url else "managed")
+
+    @property
+    def runpod_configured(self) -> bool:
+        """Whether the app can start pods: the API key, volume, registry auth and image are all set."""
+        return bool(self.runpod_api_key and self.runpod_volume_id and self.runpod_registry_auth_id
+                    and self.worker_image)
 
     @property
     def gpu_list(self) -> list[str]:
@@ -107,6 +137,8 @@ def load_settings(**overrides: Any) -> Settings:
             name = ".".join(str(p) for p in err["loc"]).upper()
             if err["type"] == "missing":
                 problems.append(f"{name} is not set")
+            elif not name:  # a rule across settings; its message names them
+                problems.append(err["msg"].removeprefix("Value error, "))
             else:
                 problems.append(f"{name}: {err['msg']}")
         raise ConfigError("invalid settings: " + "; ".join(problems)) from None

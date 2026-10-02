@@ -23,6 +23,7 @@ from pydantic import ValidationError
 from radar_desk.db import IllegalTransition
 from radar_desk.gpu.backend import ARTEFACT_FILES, Errored, Finished, artefact_keys
 from radar_desk.records import Job, JobError, Lease, Timings, Worker, WorkerToken, new_id
+from radar_desk.services.compute import job_backend
 from radar_desk.services.costs import iso_at, parse_iso
 from radar_desk.services.errors import ServiceError
 from radar_desk.services.scans import source_key
@@ -47,9 +48,11 @@ class WorkerService:
         self.results = results
         self.clock = clock
         self._lock = threading.RLock()
-        # What `settle` needs. Worker jobs are never priced, whatever the configured backend.
-        self._settle_on = SimpleNamespace(db=db, results=results, costs=None,
-                                          backend=SimpleNamespace(priced=False))
+        # The compute mode; build_services points it at the compute service.
+        self.mode: Callable[[], str] = lambda: self.settings.gpu_backend
+        # What `settle` needs. Worker jobs are never priced, whatever the current backend.
+        unpriced = SimpleNamespace(priced=False)
+        self._settle_on = SimpleNamespace(db=db, results=results, costs=None, backend_for=lambda job: unpriced)
 
     # Tokens
 
@@ -117,14 +120,16 @@ class WorkerService:
     def claim(self, token: WorkerToken, worker_info: dict) -> dict | None:
         """Claim the oldest queued job for this worker, or None when there is nothing to do.
 
-        Only on GPU_BACKEND=worker, so a worker never takes a job another backend would spawn. A job whose
+        Only in compute mode worker and while no other backend's job is submitted, so a worker never takes
+        a job another backend would spawn and jobs run one at a time. A job whose
         scan is gone or not ready is failed as input_error and the next one is tried.
         """
         worker_id = worker_info["id"]
         with self._lock:
             now = self.clock()
             job = None
-            while self.settings.gpu_backend == "worker":
+            others = any(job_backend(j) != "worker" for j in self.db.list_jobs(state="submitted", limit=100_000))
+            while self.mode() == "worker" and not others:  # one job at a time across backends
                 lease_id = f"wk_{secrets.token_hex(8)}"
                 lease = Lease(worker_id=worker_id, expires_at=iso_at(now + self.settings.worker_lease_s),
                               heartbeat_at=iso_at(now))
@@ -276,15 +281,17 @@ class WorkerService:
     # Desk tick
 
     def tick(self, now: float | None = None) -> None:
-        """Fail submitted jobs past GPU_TIMEOUT_S as `timeout`; re-queue jobs whose lease expired, failing
-        them as `lease_expired` on the third loss."""
+        """Fail leased jobs past GPU_TIMEOUT_S as `timeout`; re-queue jobs whose lease expired, failing
+        them as `lease_expired` on the third loss. A job without a lease is the poller's."""
         now = self.clock() if now is None else now
         with self._lock:
             for job in self.db.list_jobs(state="submitted", limit=100_000):
+                if job.lease is None:
+                    continue
                 if job.submitted_at and now - parse_iso(job.submitted_at) > self.settings.gpu_timeout_s:
                     self.db.transition(job, "failed", finished_at=iso_at(now), error=JobError(
                         klass="timeout", message=f"no result within {self.settings.gpu_timeout_s} s"))
-                elif job.lease is not None and parse_iso(job.lease.expires_at) < now:
+                elif parse_iso(job.lease.expires_at) < now:
                     losses = job.lease_losses + 1
                     if losses >= MAX_LEASE_LOSSES:
                         self.db.transition(job, "failed", finished_at=iso_at(now), lease_losses=losses,
@@ -294,7 +301,6 @@ class WorkerService:
                         self.db.transition(job, "queued", queued_at=iso_at(now), lease_losses=losses)
                 else:
                     continue
-                if job.lease is not None:
-                    worker = self.db.get_worker(job.lease.worker_id)
-                    if worker is not None and worker.job_id == job.id:
-                        self.db.upsert_worker(worker.model_copy(update={"job_id": None}))
+                worker = self.db.get_worker(job.lease.worker_id)
+                if worker is not None and worker.job_id == job.id:
+                    self.db.upsert_worker(worker.model_copy(update={"job_id": None}))

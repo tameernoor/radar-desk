@@ -11,6 +11,9 @@ ENV_NAMES = [
     "OWNER_TOKEN", "SESSION_SECRET", "GPU_BACKEND", "MAX_UPLOAD_BYTES", "GPU_MONTHLY_BUDGET_USD",
     "RADAR_GPU", "MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET", "LLM_PROVIDER", "LLM_API_KEY", "LLM_BASE_URL", "DATA_DIR", "CHAT_MODEL",
     "STORAGE_BACKEND", "MODAL_DATA_VOLUME", "S3_BUCKET", "WORKER_LEASE_S",
+    "WORKER_IMAGE", "WORKER_PUBLIC_URL", "WORKER_TUNNEL", "RUNPOD_API_KEY", "RUNPOD_VOLUME_ID",
+    "RUNPOD_REGISTRY_AUTH_ID", "RUNPOD_DATACENTER", "RUNPOD_IDLE_MIN", "RUNPOD_MAX_POD_HOURS",
+    "RUNPOD_START_TIMEOUT_S",
 ]
 
 
@@ -161,3 +164,37 @@ def test_modal_gpu_needs_a_bucket_or_the_volume(make_services):
                    svc, start_poller=False)
     for ok in ({"storage_backend": "modal_volume"}, {"s3_bucket": "b"}):
         create_app(svc.settings.model_copy(update={**modal, **ok}), svc, start_poller=False)
+
+
+# Compute switch
+
+
+def test_tunnel_mode_is_inferred_from_the_public_url():
+    assert _settings().tunnel_mode == "managed"
+    assert _settings(worker_public_url="https://desk.example").tunnel_mode == "external"
+    assert _settings(worker_tunnel="managed").tunnel_mode == "managed"
+    external = _settings(worker_tunnel="external", worker_public_url="https://desk.example")
+    assert external.tunnel_mode == "external"
+
+
+def test_tunnel_mode_contradictions_are_config_errors(monkeypatch):
+    monkeypatch.setenv("OWNER_TOKEN", "o")
+    monkeypatch.setenv("SESSION_SECRET", "s")
+    monkeypatch.setenv("WORKER_TUNNEL", "external")
+    with pytest.raises(ConfigError, match="WORKER_TUNNEL=external needs WORKER_PUBLIC_URL"):
+        load_settings(_env_file=None)
+    monkeypatch.setenv("WORKER_TUNNEL", "managed")
+    monkeypatch.setenv("WORKER_PUBLIC_URL", "https://desk.example")
+    with pytest.raises(ConfigError, match="WORKER_TUNNEL=managed starts its own tunnel"):
+        load_settings(_env_file=None)
+
+
+def test_runpod_settings_and_defaults(monkeypatch):
+    s = _settings()
+    assert s.worker_image is None and not s.runpod_configured
+    assert (s.runpod_datacenter, s.runpod_idle_min, s.runpod_max_pod_hours, s.runpod_start_timeout_s) == (
+        "EU-RO-1", 10, 3, 600)
+    monkeypatch.setenv("RUNPOD_API_KEY", "rp-secret-7777")
+    full = _settings(runpod_volume_id="v", runpod_registry_auth_id="r", worker_image="img")
+    assert full.runpod_configured and "rp-secret-7777" not in repr(full)
+    assert not _settings(runpod_volume_id="v", runpod_registry_auth_id="r").runpod_configured

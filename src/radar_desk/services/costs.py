@@ -90,41 +90,47 @@ class CostService:
         self.db = db
         self.settings = settings
 
-    def spend_for_month(self, month: str) -> float:
-        """Every attempt with a stored cost in `month`, including a retried job's earlier attempts."""
-        return self.db.sum_cost_for_month(month)
+    def spend_for_month(self, month: str, now: float) -> float:
+        """Every attempt with a stored cost in `month`, including a retried job's earlier attempts, plus the
+        RunPod pods of the month (the open one up to `now`)."""
+        return self.db.sum_cost_for_month(month) + self.db.pods_cost_for_month(month, now)
 
     def in_flight(self) -> float:
         """A worst case per submitted job, whose current attempt has no stored cost yet."""
         return worst_case(self.settings) * len(self.db.list_jobs(state="submitted", limit=100_000))
 
     def budget_allows_now(self, now: float) -> bool:
-        return budget_allows(self.spend_for_month(month_of(now)), self.settings, self.in_flight())
+        return budget_allows(self.spend_for_month(month_of(now), now), self.settings, self.in_flight())
 
     def attempt_cost(self, job: Job, timings: Timings | dict | None, gpu: str | None, now: float) -> float:
         elapsed = now - parse_iso(job.submitted_at) if job.submitted_at else None
         return estimate(timings, gpu or (job.gpu_requested[0] if job.gpu_requested else None),
                         self.settings, elapsed_s=elapsed)
 
-    def gpu_status(self, backend_name: str, now: float) -> dict:
+    def gpu_status(self, backend_name: str, now: float, compute_mode: str | None = None,
+                   pod: dict | None = None) -> dict:
         """The body of GET /gpu/status. `queued` is oldest first with held jobs included; the hourly
-        price is that of the GPU in use or first requested, null on any backend but modal."""
+        price is the open pod's, else that of the GPU in use or first requested on modal, else null."""
         month = month_of(now)
         submitted = self.db.list_jobs(state="submitted", limit=100_000)
         queued = self.db.list_jobs(state="queued", limit=100_000)
         in_flight = submitted[-1] if submitted else None
         price = None
-        if backend_name == "modal":
+        if pod is not None and pod.get("cost_per_hr") is not None:
+            price = round(pod["cost_per_hr"], 4)
+        elif backend_name == "modal":
             gpu = (in_flight.gpu_used if in_flight else None) or next(iter(self.settings.gpu_list), None)
             price = round(price_per_s(gpu, self.settings) * 3600, 4)
         return {
             "backend": backend_name,
+            "compute_mode": compute_mode or backend_name,
+            "pod": pod,
             "gpu_requested": self.settings.gpu_list,
             "in_flight": in_flight.model_dump() if in_flight else None,
             "held": [j.model_dump() for j in reversed(queued) if j.hold_reason],
             "queued": [j.model_dump() for j in reversed(queued)],
             "price_per_hour_usd": price,
-            "spend_month_usd": round(self.spend_for_month(month), 6),
+            "spend_month_usd": round(self.spend_for_month(month, now), 6),
             "budget_usd": self.settings.gpu_monthly_budget_usd,
             "month": month,
         }

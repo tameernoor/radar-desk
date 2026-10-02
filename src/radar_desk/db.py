@@ -11,6 +11,7 @@ import sqlite3
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,7 @@ from radar_desk.records import (
     Job,
     JobState,
     Lease,
+    PodRecord,
     Result,
     Scan,
     ScanState,
@@ -87,6 +89,23 @@ MIGRATIONS: list[str] = [
         created_at TEXT NOT NULL,
         payload TEXT NOT NULL
     );
+    """,
+    # 3: the compute choice and the RunPod pods the app starts
+    """
+    CREATE TABLE compute (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
+
+    CREATE TABLE pods (
+        id TEXT PRIMARY KEY,
+        runpod_id TEXT,
+        phase TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        stopped_at TEXT,
+        payload TEXT NOT NULL
+    );
+    CREATE INDEX pods_stopped ON pods(stopped_at);
     """,
 ]
 
@@ -285,7 +304,7 @@ class Database:
                 return None
             current = Job.model_validate_json(rows[0][0])
             job = _merge(current, {"state": "submitted", "modal_call_id": lease_id, "lease": lease,
-                                   "submitted_at": at, "error": None})
+                                   "submitted_at": at, "error": None, "backend": "worker"})
             self._write_job(con, job, insert=False)
         return job
 
@@ -342,6 +361,83 @@ class Database:
             (f"{month}-%",),
         )
         return float(rows[0][0])
+
+    def last_finished_at(self) -> str | None:
+        rows = self._query("SELECT MAX(finished_at) FROM jobs")
+        return rows[0][0]
+
+    # Compute settings and pods
+
+    def get_setting(self, key: str) -> str | None:
+        rows = self._query("SELECT value FROM compute WHERE key = ?", (key,))
+        return rows[0][0] if rows else None
+
+    def set_setting(self, key: str, value: str | None) -> None:
+        """Store `value` under `key`; None removes the key."""
+        with self._tx() as con:
+            if value is None:
+                con.execute("DELETE FROM compute WHERE key = ?", (key,))
+            else:
+                con.execute("INSERT INTO compute (key, value) VALUES (?, ?)"
+                            " ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
+
+    def seed_setting(self, key: str, value: str) -> str:
+        """Store `value` unless `key` is already set, and return what is stored."""
+        with self._tx() as con:
+            con.execute("INSERT OR IGNORE INTO compute (key, value) VALUES (?, ?)", (key, value))
+            return con.execute("SELECT value FROM compute WHERE key = ?", (key,)).fetchone()[0]
+
+    def _write_pod(self, con: sqlite3.Connection, pod: PodRecord) -> None:
+        con.execute(
+            "INSERT INTO pods (id, runpod_id, phase, created_at, stopped_at, payload)"
+            " VALUES (?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(id) DO UPDATE SET runpod_id = excluded.runpod_id, phase = excluded.phase,"
+            " stopped_at = excluded.stopped_at, payload = excluded.payload",
+            (pod.id, pod.runpod_id, pod.phase, pod.created_at, pod.stopped_at, pod.model_dump_json()),
+        )
+
+    def insert_pod(self, pod: PodRecord) -> None:
+        with self._tx() as con:
+            self._write_pod(con, pod)
+
+    def get_pod(self, pod_id: str) -> PodRecord | None:
+        rows = self._query("SELECT payload FROM pods WHERE id = ?", (pod_id,))
+        return PodRecord.model_validate_json(rows[0][0]) if rows else None
+
+    def update_pod(self, pod_id: str, **fields: Any) -> PodRecord:
+        _reject_fields(fields, "id")
+        with self._tx() as con:
+            current = self.get_pod(pod_id)
+            if current is None:
+                raise KeyError(pod_id)
+            pod = _merge(current, fields)
+            self._write_pod(con, pod)
+        return pod
+
+    def open_pod(self) -> PodRecord | None:
+        """The newest pod row that is not stopped."""
+        rows = self._query("SELECT payload FROM pods WHERE stopped_at IS NULL"
+                           " ORDER BY created_at DESC, rowid DESC LIMIT 1")
+        return PodRecord.model_validate_json(rows[0][0]) if rows else None
+
+    def list_pods(self, limit: int = 100) -> list[PodRecord]:
+        rows = self._query("SELECT payload FROM pods ORDER BY created_at DESC, rowid DESC LIMIT ?", (limit,))
+        return [PodRecord.model_validate_json(r[0]) for r in rows]
+
+    def pods_cost_for_month(self, month: str, now: float) -> float:
+        """Closed pods stopped in `month` by their `cost_usd`, plus the open pod's cost so far when `now`
+        is in `month`."""
+        rows = self._query(
+            "SELECT TOTAL(json_extract(payload, '$.cost_usd')) FROM pods WHERE stopped_at LIKE ?",
+            (f"{month}-%",),
+        )
+        total = float(rows[0][0])
+        pod = self.open_pod()
+        current = datetime.fromtimestamp(now, UTC)
+        if pod is not None and pod.started_at and pod.cost_per_hr and current.strftime("%Y-%m") == month:
+            started = datetime.strptime(pod.started_at, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=UTC)
+            total += pod.cost_per_hr * max(0.0, (current - started).total_seconds()) / 3600
+        return total
 
     # Worker tokens
 
