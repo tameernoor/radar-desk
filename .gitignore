@@ -16,3 +16,6 @@ fixtures/expected/radar-web/*.json
 .env.*
 !.env.example
 web/.smoke-out/
+
+# Internal design notes
+docs/
