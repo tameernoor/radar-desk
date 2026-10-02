@@ -40,19 +40,19 @@ class JobService:
         self,
         db: Any,
         settings: Any,
-        backend: Any,
+        compute: Any,
         costs: CostService,
         clock: Callable[[], float] = time.time,
         version: str | None = None,
     ) -> None:
         self.db = db
         self.settings = settings
-        self.backend = backend
+        self.compute = compute
         self.costs = costs
         self.clock = clock
         version = version or model_version()
         # Fake results must never pass for real ones, so they get their own model version.
-        self.model_version = f"fake-{version}" if getattr(backend, "name", None) == "fake" else version
+        self.model_version = f"fake-{version}" if compute.mode == "fake" else version
         self._create_lock = threading.Lock()
 
     def get(self, job_id: str) -> Job:
@@ -90,13 +90,14 @@ class JobService:
             return self.db.transition(job, "cancelled", finished_at=iso_at(self.clock()))
         if job.state != "submitted":
             raise ServiceError(409, f"job {job_id} is {job.state} and cannot be cancelled")
+        backend = self.compute.backend_for(job)
         if job.modal_call_id:
             try:
-                self.backend.cancel(job.modal_call_id)
+                backend.cancel(job.modal_call_id)
             except Exception as exc:
                 raise ServiceError(502, f"could not cancel the GPU call: {exc}") from exc
         now = self.clock()
-        if not getattr(self.backend, "priced", True):
+        if not getattr(backend, "priced", True):
             return self.db.transition(job, "cancelled", finished_at=iso_at(now))
         cost = (job.cost_estimate_usd or 0.0) + self.costs.attempt_cost(job, None, None, now)
         return self.db.transition(job, "cancelled", finished_at=iso_at(now), cost_estimate_usd=cost)
@@ -115,7 +116,7 @@ class JobService:
         if not job.modal_call_id:
             return ""
         try:
-            return self.backend.logs(job.modal_call_id, lines)
+            return self.compute.backend_for(job).logs(job.modal_call_id, lines)
         except Exception as exc:
             raise ServiceError(502, f"could not read the logs: {exc}") from exc
 

@@ -1,5 +1,6 @@
 import "./styles.css";
-import { ApiError, del, get, post } from "./api.js";
+import { ApiError, api, del, get, post } from "./api.js";
+import { computePhrase } from "./compute.js";
 import { el, elapsed, shortId, usd, when } from "./format.js";
 import { wireLogout } from "./login.js";
 
@@ -108,6 +109,71 @@ async function load() {
   jobs = j.jobs;
   scanNames = new Map(s.scans.map((x) => [x.id, x.filename]));
   render();
+}
+
+// ---------- compute ----------
+
+let compute = null; // the last GET /compute body
+let gpus = []; // the Modal GPUs requested, for the phrase
+
+const modeLabel = (mode) => (mode === "modal" ? "Modal" : compute?.runpod.configured ? "RunPod" : "Worker");
+
+async function computeAct(promise) {
+  const status = document.getElementById("compute-status");
+  status.textContent = "";
+  try {
+    const body = await promise;
+    if (body) renderCompute(body);
+  } catch (e) {
+    if (!(e instanceof ApiError && e.status === 401)) status.textContent = e.message;
+  }
+}
+
+function renderCompute(c) {
+  compute = c;
+  const jobId = c.pod?.job_id || c.in_flight?.job_id;
+  const job = jobId && jobs.find((j) => j.id === jobId);
+  const { text, tone } = computePhrase({ ...c, gpus, scan: job && scanNames.get(job.scan_id) }, Date.now());
+  const line = document.getElementById("compute-line");
+  line.textContent = text;
+  line.dataset.tone = tone;
+  for (const input of document.querySelectorAll('input[name="compute-mode"]')) {
+    input.checked = input.value === c.mode; // also snaps a radio back while a switch waits for its confirmation
+    input.disabled = !c.changeable;
+    if (!input.dataset.armed) input.parentElement.querySelector("[data-label]").textContent = modeLabel(input.value);
+  }
+  document.getElementById("compute-fixed").hidden = c.changeable;
+  document.getElementById("pod-start").hidden = !(c.mode === "worker" && c.runpod.configured && !c.pod);
+  document.getElementById("pod-stop").hidden = !c.pod;
+}
+
+function chooseMode(input) {
+  // With a job in flight a switch needs a second click on the same radio; no modal dialogs.
+  const job = compute?.in_flight;
+  if (job && !input.dataset.armed) {
+    input.dataset.armed = "1";
+    const where = { modal: "Modal", worker: modeLabel("worker"), fake: "the fake backend" }[job.backend] || job.backend;
+    input.parentElement.querySelector("[data-label]").textContent =
+      `Switch to ${modeLabel(input.value)}? Job ${shortId(job.job_id)} finishes on ${where}`;
+    setTimeout(() => {
+      delete input.dataset.armed;
+      renderCompute(compute);
+    }, 4000);
+    renderCompute(compute);
+    return;
+  }
+  delete input.dataset.armed;
+  computeAct(api("/compute", { method: "PUT", body: { mode: input.value } }));
+}
+
+const loadCompute = () => computeAct(get("/compute"));
+
+function wireCompute() {
+  for (const input of document.querySelectorAll('input[name="compute-mode"]')) {
+    input.addEventListener("change", () => chooseMode(input));
+  }
+  document.getElementById("pod-start").addEventListener("click", () => computeAct(post("/compute/pod/start")));
+  document.getElementById("pod-stop").addEventListener("click", () => computeAct(post("/compute/pod/stop")));
 }
 
 // ---------- workers ----------
@@ -223,8 +289,12 @@ async function main() {
   } catch {
     return;
   }
+  wireCompute();
   wireWorkers();
-  await Promise.all([load(), loadTokens(), loadWorkers()]);
+  const loadGpus = () => get("/gpu/status").then((g) => (gpus = g.gpu_requested), () => {});
+  await Promise.all([load(), loadTokens(), loadWorkers(), loadGpus()]);
+  await loadCompute();
+  setInterval(loadCompute, 5000);
   setInterval(loadWorkers, 5000);
   setInterval(() => {
     // Refresh while anything is moving, but keep open logs stable.

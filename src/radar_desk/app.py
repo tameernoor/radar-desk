@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ from radar_desk.routes import (
     auth,
     catalog,
     chat,
+    compute,
     export,
     fixtures,
     gpu,
@@ -38,6 +40,7 @@ from radar_desk.routes import (
 )
 from radar_desk.routes.health import VERSION
 from radar_desk.services import ServiceError, Services, build_services
+from radar_desk.services.compute import MODAL_NEEDS_STORAGE
 from radar_desk.storage import LocalStorage, ModalVolumeStorage, storage_backend
 
 log = logging.getLogger(__name__)
@@ -52,17 +55,22 @@ def create_app(settings: Any = None, services: Services | None = None, start_pol
     the lifespan only runs the poller."""
     settings = settings if settings is not None else (services.settings if services else load_settings())
     if settings.gpu_backend == "modal" and storage_backend(settings) == "local":
-        raise ConfigError("GPU_BACKEND=modal needs S3_BUCKET or STORAGE_BACKEND=modal_volume: "
-                          "Modal cannot reach the local storage URLs")
+        raise ConfigError(MODAL_NEEDS_STORAGE)
     services = services if services is not None else build_services(settings)
+    if services.compute.changeable and services.compute.mode == "modal" and storage_backend(settings) == "local":
+        services.compute.fall_back_from_modal()  # refusing would leave the owner no way to switch back
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         stop = asyncio.Event()
         task = None
         if start_poller:
+            try:
+                await asyncio.to_thread(services.compute.reconcile_at_start, time.time())
+            except Exception:
+                log.exception("compute: reconcile at start failed")
             task = asyncio.create_task(Poller(services).run(stop), name="radar-poller")
-            log.info("poller started on the %s backend", services.backend.name)
+            log.info("poller started in compute mode %s", services.compute.mode)
         try:
             yield
         finally:
@@ -95,7 +103,7 @@ def create_app(settings: Any = None, services: Services | None = None, start_pol
         return JSONResponse({"detail": "; ".join(parts) or "invalid request"}, status_code=422)
 
     for module in (health, auth, uploads, scans, jobs, results, export, gpu, catalog, fixtures, chat, worker,
-                   workers):
+                   workers, compute):
         app.include_router(module.router)
     if isinstance(services.storage, LocalStorage):
         app.include_router(local_storage.router)

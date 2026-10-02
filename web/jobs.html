@@ -16,6 +16,18 @@
     <button type="button" class="link" id="logout">Log out</button>
   </header>
   <main class="content">
+    <section aria-labelledby="compute-title">
+      <h2 id="compute-title">Compute</h2>
+      <div class="row" role="radiogroup" aria-labelledby="compute-title">
+        <label><input type="radio" name="compute-mode" value="modal"> <span data-label>Modal</span></label>
+        <label><input type="radio" name="compute-mode" value="worker"> <span data-label>RunPod</span></label>
+        <button type="button" id="pod-start" hidden>Start now</button>
+        <button type="button" id="pod-stop" class="danger" hidden>Stop now</button>
+      </div>
+      <p class="muted" id="compute-fixed" hidden>The fake backend is chosen at start-up.</p>
+      <p class="status-line compute-line" id="compute-line" role="status" aria-live="polite"></p>
+      <p class="status-line error" id="compute-status" role="status" aria-live="polite"></p>
+    </section>
     <section aria-labelledby="jobs-title">
       <div class="section-head">
         <h2 id="jobs-title">Jobs</h2>

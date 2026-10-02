@@ -80,6 +80,9 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .gpu-strip { padding: 0.45rem 1rem; background: var(--panel-2); border-bottom: 1px solid var(--line); }
 .gpu-strip.busy strong { color: var(--accent); }
 .gpu-strip.held strong { color: var(--warn); }
+.compute-line[data-tone="busy"] { color: var(--accent); }
+.compute-line[data-tone="held"] { color: var(--warn); }
+.compute-line[data-tone="problem"] { color: var(--bad); }
 
 .dropzone { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 1rem; }
 .policy { color: var(--warn); margin: 0 0 0.6rem; }

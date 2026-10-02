@@ -228,10 +228,9 @@ def test_claim_puts_the_job_back_when_clearing_old_artefacts_fails(desk, monkeyp
     assert desk.claim()["job_id"] == job_id
 
 
-def test_claim_needs_the_worker_backend(make_desk):
+def test_claim_needs_the_worker_mode(make_desk):
     desk = make_desk()
-    desk.svc.settings = desk.svc.settings.model_copy(update={"gpu_backend": "fake"})
-    desk.svc.workers.settings = desk.svc.settings
+    desk.svc.db.set_setting("mode", "modal")  # set_mode refuses modal on local storage
     desk.queue()
     assert desk.worker.post("/worker/claim", json={"worker": INFO}).status_code == 204
 
@@ -560,7 +559,7 @@ def test_workers_list_and_gpu_status(desk):
     desk.queue()
     desk.claim()
     body = desk.owner.get("/workers").json()
-    assert body["app_url"] == "http://testserver" and body["image"] == "radar-worker" and body["lease_s"] == 120
+    assert body["app_url"] == "http://testserver" and body["image"] is None and body["lease_s"] == 120
     [worker] = body["workers"]
     assert worker["id"] == "pod-1" and worker["online"] is True and worker["gpu_name"] == "NVIDIA L4"
     assert worker["job_id"] and worker["token_name"] == "runpod" and worker["versions"]["torch"] == "2.5.1"

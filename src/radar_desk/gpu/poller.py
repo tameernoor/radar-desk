@@ -28,8 +28,11 @@ ALL = 100_000
 class Poller:
     def __init__(self, services: Any, backend: Any = None, clock: Callable[[], float] = time.time) -> None:
         self.services = services
-        self.backend = backend if backend is not None else services.backend
+        self.backend = backend  # a test's backend for every job; None means the compute service decides
         self.clock = clock
+
+    def _backend_for(self, job: Job) -> Any:
+        return self.backend if self.backend is not None else self.services.backend_for(job)
 
     @property
     def db(self) -> Any:
@@ -40,25 +43,35 @@ class Poller:
         return self.services.settings
 
     def tick(self) -> None:
-        """One pass: collect submitted jobs first, then spawn the oldest queued job if none is running.
+        """One pass: the job desk's lease checks, the compute rules, collecting submitted jobs, then
+        spawning the oldest queued job if none is running.
 
         Jobs run one at a time. The function has max_containers=1 anyway, and a job queued behind
-        another must not start its stuck clock. On a pull backend the workers claim jobs themselves,
-        so the poller only runs the job desk's lease and timeout checks.
+        another must not start its stuck clock. Pull workers claim and finish their jobs themselves, so
+        their jobs are left to the desk, and nothing is spawned while the current backend is a pull one.
         """
-        if getattr(self.backend, "pull", False):
-            self.services.workers.tick(self.clock())
-            return
+        now = self.clock()
+        self.services.workers.tick(now)
+        try:
+            self.services.compute.tick(now)
+        except Exception:
+            log.exception("poller: the compute tick failed")
         for job in reversed(self.db.list_jobs(state="submitted", limit=ALL)):
+            backend = self._backend_for(job)
+            if getattr(backend, "pull", False):
+                continue
             try:
-                self._check_submitted(job)
+                self._check_submitted(job, backend)
             except Exception:
                 log.exception("poller: checking job %s failed", job.id)
         if self.db.list_jobs(state="submitted", limit=1):
             return
+        backend = self.backend if self.backend is not None else self.services.backend
+        if getattr(backend, "pull", False):
+            return
         for job in reversed(self.db.list_jobs(state="queued", limit=ALL)):
             try:
-                if self._try_spawn(job):
+                if self._try_spawn(job, backend):
                     return
             except Exception:
                 log.exception("poller: spawning job %s failed", job.id)
@@ -80,7 +93,7 @@ class Poller:
         if job.hold_reason != reason or job.error != error:
             self.db.update_job(job.id, hold_reason=reason, error=error)
 
-    def _try_spawn(self, job: Job) -> bool:
+    def _try_spawn(self, job: Job, backend: Any) -> bool:
         """Spawn one queued job. True when it is now submitted."""
         now = self.clock()
         scan = self.db.get_scan(job.scan_id)
@@ -99,7 +112,7 @@ class Poller:
         # A spawn that raises after Modal accepted the call (a response timeout, say) is held as
         # spawn_error and spawned again next tick, which can duplicate a run.
         try:
-            call_id = self.backend.spawn(job, source_url, put_urls, keys)
+            call_id = backend.spawn(job, source_url, put_urls, keys)
         except Exception as exc:  # noqa: BLE001 - held and retried next tick
             log.warning("poller: spawn of job %s failed: %s", job.id, exc)
             self._hold(job, "spawn_error", JobError(klass=type(exc).__name__, message=str(exc)))
@@ -108,6 +121,7 @@ class Poller:
             self.db.transition(
                 job, "submitted",
                 modal_call_id=call_id,
+                backend=backend.name,
                 gpu_requested=self.settings.gpu_list,
                 submitted_at=iso_at(now),
                 hold_reason=None,
@@ -118,7 +132,7 @@ class Poller:
             # Cancel it so it is not orphaned, and let tick() log the failure.
             log.error("poller: job %s spawned as call %s but could not be marked submitted", job.id, call_id)
             try:
-                self.backend.cancel(call_id)
+                backend.cancel(call_id)
             except Exception as exc:  # noqa: BLE001 - best effort, already logged above
                 log.warning("poller: cancel of orphaned call %s failed: %s", call_id, exc)
             raise
@@ -130,13 +144,13 @@ class Poller:
                 gpu_used: str | None = None, error: JobError | None = None) -> Job:
         return _finish(self.services, job, state, now, timings, gpu_used, error)
 
-    def _check_submitted(self, job: Job) -> None:
+    def _check_submitted(self, job: Job, backend: Any) -> None:
         now = self.clock()
         if not job.modal_call_id:
             self._finish(job, "failed", now, error=JobError(klass="lost", message="no call id was stored"))
             return
         try:
-            outcome = self.backend.poll(job.modal_call_id)
+            outcome = backend.poll(job.modal_call_id)
         except Exception as exc:  # noqa: BLE001 - the backend itself is unreachable; try again next tick
             log.warning("poller: poll of job %s failed: %s", job.id, exc)
             outcome = Pending()
@@ -144,7 +158,7 @@ class Poller:
             started = parse_iso(job.submitted_at) if job.submitted_at else now
             if now - started > 2 * self.settings.gpu_timeout_s + STUCK_MARGIN_S:
                 try:
-                    self.backend.cancel(job.modal_call_id)
+                    backend.cancel(job.modal_call_id)
                 except Exception as exc:  # noqa: BLE001 - the job fails as stuck anyway
                     log.warning("poller: cancel of stuck job %s failed: %s", job.id, exc)
                 self._finish(job, "failed", now, error=JobError(
@@ -167,7 +181,7 @@ def _finish(services: Any, job: Job, state: str, now: float, timings: dict | Non
             gpu_used: str | None = None, error: JobError | None = None) -> Job:
     """Move a submitted job to its final state. The attempt's cost is added only on a priced backend."""
     fields: dict[str, Any] = {}
-    if getattr(services.backend, "priced", True):
+    if getattr(services.backend_for(job), "priced", True):
         attempt = services.costs.attempt_cost(job, timings, gpu_used, now)
         fields["cost_estimate_usd"] = (job.cost_estimate_usd or 0.0) + attempt
     return services.db.transition(

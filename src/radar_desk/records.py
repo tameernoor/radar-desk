@@ -17,6 +17,7 @@ ScanState = Literal["uploading", "ready", "rejected"]
 JobState = Literal["queued", "submitted", "done", "failed", "cancelled"]
 TERMINAL_JOB_STATES: tuple[str, ...] = ("done", "failed", "cancelled")
 ChatState = Literal["running", "awaiting", "done", "error"]
+PodPhase = Literal["tunnel", "starting", "ready", "stopped"]
 
 Box = list[list[float]]  # [[xmin, ymin, zmin], [xmax, ymax, zmax]] in world mm
 
@@ -88,6 +89,30 @@ class Job(BaseModel):
     cost_estimate_usd: float | None = None
     lease: Lease | None = None
     lease_losses: int = 0
+    backend: str | None = None  # modal, worker or fake, set at spawn and at claim
+
+
+class PodRecord(BaseModel):
+    """A RunPod worker pod the app started, from its tunnel to its deletion. `id` is local."""
+
+    id: str = Field(default_factory=lambda: new_id("pod"))
+    runpod_id: str | None = None
+    name: str = "radar-worker"
+    phase: PodPhase = "tunnel"
+    gpu: str | None = None
+    image: str | None = None
+    cost_per_hr: float | None = None
+    created_at: str = Field(default_factory=now_iso)
+    started_at: str | None = None
+    ready_at: str | None = None
+    stopped_at: str | None = None
+    token_id: str | None = None
+    worker_id: str = Field(default_factory=lambda: f"runpod-{secrets.token_hex(3)}")
+    tunnel_url: str | None = None
+    tunnel: dict[str, Any] | None = None  # {pid, url, log, binary}, managed tunnel only
+    cost_usd: float | None = None
+    reason: str | None = None
+    error: str | None = None
 
 
 class WorkerToken(BaseModel):
