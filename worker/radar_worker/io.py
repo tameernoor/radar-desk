@@ -8,7 +8,6 @@ failure raises `TransferError`; network failures carry status 0.
 from __future__ import annotations
 
 import os
-import shutil
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -42,32 +41,45 @@ def _open(req: urllib.request.Request, timeout: float):
         raise TransferError(0, str(getattr(err, "reason", err)), req.full_url) from None
 
 
-def download(url: str, path, timeout: float = 600) -> int:
-    """GET `url` into `path` through a temporary file; returns the byte count."""
+def download(url: str, path, timeout: float = 600, headers: dict | None = None, on_chunk=None) -> int:
+    """GET `url` into `path` through a temporary file; returns the byte count. `headers` are sent too.
+
+    `on_chunk(length)` is called after each chunk is written; an exception from it aborts the
+    download, removes the temporary file and propagates.
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     part = path.with_name(path.name + ".part")
-    req = urllib.request.Request(url, method="GET")
+    req = urllib.request.Request(url, method="GET", headers=dict(headers or {}))
     with _open(req, timeout) as resp:
         status = getattr(resp, "status", 200)
         if not 200 <= status < 300:
             raise TransferError(status, _snippet(resp.read(300)), url)
         try:
             with open(part, "wb") as fh:
-                shutil.copyfileobj(resp, fh, CHUNK)
+                while True:
+                    chunk = resp.read(CHUNK)
+                    if not chunk:
+                        break
+                    fh.write(chunk)
+                    if on_chunk is not None:
+                        on_chunk(len(chunk))
         except OSError as err:
             part.unlink(missing_ok=True)
             raise TransferError(0, f"read failed: {err}", url) from None
+        except BaseException:
+            part.unlink(missing_ok=True)
+            raise
     os.replace(part, path)
     return path.stat().st_size
 
 
-def _put(url: str, body, length: int, content_type: str, timeout: float) -> None:
+def _put(url: str, body, length: int, content_type: str, timeout: float, headers: dict | None = None) -> None:
     req = urllib.request.Request(
         url,
         data=body,
         method="PUT",
-        headers={"Content-Length": str(length), "Content-Type": content_type},
+        headers={**(headers or {}), "Content-Length": str(length), "Content-Type": content_type},
     )
     with _open(req, timeout) as resp:
         status = getattr(resp, "status", 200)
@@ -76,14 +88,15 @@ def _put(url: str, body, length: int, content_type: str, timeout: float) -> None
             raise TransferError(status, _snippet(tail), url)
 
 
-def upload(path, url: str, content_type: str, timeout: float = 600) -> None:
-    """PUT the file at `path` to `url` with Content-Length set."""
+def upload(path, url: str, content_type: str, timeout: float = 600, headers: dict | None = None) -> None:
+    """PUT the file at `path` to `url` with Content-Length set. `headers` are sent too."""
     path = Path(path)
     size = path.stat().st_size
     with open(path, "rb") as fh:
-        _put(url, fh, size, content_type, timeout)
+        _put(url, fh, size, content_type, timeout, headers)
 
 
-def upload_bytes(data: bytes, url: str, content_type: str, timeout: float = 600) -> None:
-    """PUT `data` to `url` with Content-Length set."""
-    _put(url, bytes(data), len(data), content_type, timeout)
+def upload_bytes(data: bytes, url: str, content_type: str, timeout: float = 600,
+                 headers: dict | None = None) -> None:
+    """PUT `data` to `url` with Content-Length set. `headers` are sent too."""
+    _put(url, bytes(data), len(data), content_type, timeout, headers)

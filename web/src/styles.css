@@ -74,6 +74,8 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .page { min-height: 100vh; display: flex; flex-direction: column; }
 .content { flex: 1; padding: 1rem; display: grid; gap: 1.5rem; align-content: start; }
 .section-head { display: flex; justify-content: space-between; align-items: center; }
+.row { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin: 0.4rem 0; }
+.row pre { margin: 0; }
 
 .gpu-strip { padding: 0.45rem 1rem; background: var(--panel-2); border-bottom: 1px solid var(--line); }
 .gpu-strip.busy strong { color: var(--accent); }

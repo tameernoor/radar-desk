@@ -1,4 +1,5 @@
 """Single-owner auth: the raw OWNER_TOKEN as a bearer, or a signed session cookie from /auth/login.
+Pull workers authenticate separately, with a worker token as a bearer (`require_worker`).
 
 The cookie carries a fingerprint of the owner token, so rotating OWNER_TOKEN or SESSION_SECRET ends
 every session. Login failures are rate limited per IP in memory.
@@ -17,6 +18,8 @@ from typing import Any
 
 from fastapi import HTTPException, Request
 from itsdangerous import BadSignature, TimestampSigner
+
+from radar_desk.records import WorkerToken
 
 COOKIE_NAME = "radar_session"
 COOKIE_MAX_AGE_S = 30 * 24 * 60 * 60
@@ -132,3 +135,15 @@ def require_owner(request: Request) -> str:
     if via is None:
         raise HTTPException(401, "not logged in", headers={"WWW-Authenticate": "Bearer"})
     return via
+
+
+def require_worker(request: Request) -> WorkerToken:
+    """FastAPI dependency: 401 unless the request carries a live worker token (`rdw_...`) as a bearer.
+    Returns the WorkerToken. The owner's token and cookie do not pass."""
+    scheme, _, value = request.headers.get("authorization", "").partition(" ")
+    token = None
+    if scheme.lower() == "bearer":
+        token = request.app.state.services.workers.authenticate(value.strip())
+    if token is None:
+        raise HTTPException(401, "not a valid worker token", headers={"WWW-Authenticate": "Bearer"})
+    return token

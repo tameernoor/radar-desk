@@ -16,7 +16,18 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from radar_desk.records import ChatExecution, Job, JobState, Result, Scan, ScanState, now_iso
+from radar_desk.records import (
+    ChatExecution,
+    Job,
+    JobState,
+    Lease,
+    Result,
+    Scan,
+    ScanState,
+    Worker,
+    WorkerToken,
+    now_iso,
+)
 
 MIGRATIONS: list[str] = [
     # 1: initial schema
@@ -58,12 +69,32 @@ MIGRATIONS: list[str] = [
         payload TEXT NOT NULL
     );
     """,
+    # 2: pull workers and their tokens
+    """
+    CREATE TABLE worker_tokens (
+        id TEXT PRIMARY KEY,
+        token_hash TEXT NOT NULL UNIQUE,
+        revoked_at TEXT,
+        created_at TEXT NOT NULL,
+        payload TEXT NOT NULL
+    );
+
+    CREATE TABLE workers (
+        id TEXT PRIMARY KEY,
+        token_id TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        job_id TEXT,
+        created_at TEXT NOT NULL,
+        payload TEXT NOT NULL
+    );
+    """,
 ]
 
-# Allowed job state changes. A failed job goes back to queued on retry; done and cancelled are final.
+# Allowed job state changes. A failed job goes back to queued on retry, a submitted one when a pull
+# worker's lease expires or it releases the job; done and cancelled are final.
 TRANSITIONS: dict[str, set[str]] = {
     "queued": {"submitted", "failed", "cancelled"},
-    "submitted": {"done", "failed", "cancelled"},
+    "submitted": {"done", "failed", "cancelled", "queued"},
     "failed": {"queued"},
     "cancelled": set(),
     "done": set(),
@@ -78,6 +109,7 @@ _RETRY_CLEARS = (
     "finished_at",
     "error",
     "timings",
+    "lease",
 )
 
 
@@ -233,6 +265,30 @@ class Database:
         )
         return [Job.model_validate_json(r[0]) for r in rows]
 
+    def get_job_by_call_id(self, call_id: str) -> Job | None:
+        rows = self._query(
+            "SELECT payload FROM jobs WHERE modal_call_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            (call_id,),
+        )
+        return Job.model_validate_json(rows[0][0]) if rows else None
+
+    def claim_job(self, lease_id: str, lease: Lease, at: str) -> Job | None:
+        """Move the oldest queued job without a hold to submitted under `lease_id`, in one transaction.
+        None when nothing is queued. Two callers never get the same job."""
+        with self._tx() as con:
+            rows = con.execute(
+                "SELECT payload FROM jobs WHERE state = 'queued'"
+                " AND json_extract(payload, '$.hold_reason') IS NULL"
+                " ORDER BY created_at, rowid LIMIT 1"
+            ).fetchall()
+            if not rows:
+                return None
+            current = Job.model_validate_json(rows[0][0])
+            job = _merge(current, {"state": "submitted", "modal_call_id": lease_id, "lease": lease,
+                                   "submitted_at": at, "error": None})
+            self._write_job(con, job, insert=False)
+        return job
+
     def latest_job_for_scan(self, scan_id: str) -> Job | None:
         jobs = self.list_jobs(scan_id=scan_id, limit=1)
         return jobs[0] if jobs else None
@@ -286,6 +342,60 @@ class Database:
             (f"{month}-%",),
         )
         return float(rows[0][0])
+
+    # Worker tokens
+
+    def insert_worker_token(self, token: WorkerToken) -> None:
+        with self._tx() as con:
+            con.execute(
+                "INSERT INTO worker_tokens (id, token_hash, revoked_at, created_at, payload) VALUES (?, ?, ?, ?, ?)",
+                (token.id, token.token_hash, token.revoked_at, token.created_at, token.model_dump_json()),
+            )
+
+    def get_worker_token(self, token_id: str) -> WorkerToken | None:
+        rows = self._query("SELECT payload FROM worker_tokens WHERE id = ?", (token_id,))
+        return WorkerToken.model_validate_json(rows[0][0]) if rows else None
+
+    def get_worker_token_by_hash(self, token_hash: str) -> WorkerToken | None:
+        rows = self._query("SELECT payload FROM worker_tokens WHERE token_hash = ?", (token_hash,))
+        return WorkerToken.model_validate_json(rows[0][0]) if rows else None
+
+    def list_worker_tokens(self) -> list[WorkerToken]:
+        rows = self._query("SELECT payload FROM worker_tokens ORDER BY created_at, rowid")
+        return [WorkerToken.model_validate_json(r[0]) for r in rows]
+
+    def update_worker_token(self, token_id: str, **fields: Any) -> WorkerToken:
+        _reject_fields(fields, "id", "token_hash")
+        with self._tx() as con:
+            current = self.get_worker_token(token_id)
+            if current is None:
+                raise KeyError(token_id)
+            token = _merge(current, fields)
+            con.execute(
+                "UPDATE worker_tokens SET revoked_at = ?, payload = ? WHERE id = ?",
+                (token.revoked_at, token.model_dump_json(), token_id),
+            )
+        return token
+
+    # Workers
+
+    def upsert_worker(self, worker: Worker) -> None:
+        with self._tx() as con:
+            con.execute(
+                "INSERT INTO workers (id, token_id, last_seen_at, job_id, created_at, payload)"
+                " VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET token_id = excluded.token_id,"
+                " last_seen_at = excluded.last_seen_at, job_id = excluded.job_id, payload = excluded.payload",
+                (worker.id, worker.token_id, worker.last_seen_at, worker.job_id, worker.first_seen_at,
+                 worker.model_dump_json()),
+            )
+
+    def get_worker(self, worker_id: str) -> Worker | None:
+        rows = self._query("SELECT payload FROM workers WHERE id = ?", (worker_id,))
+        return Worker.model_validate_json(rows[0][0]) if rows else None
+
+    def list_workers(self) -> list[Worker]:
+        rows = self._query("SELECT payload FROM workers ORDER BY last_seen_at DESC, rowid DESC")
+        return [Worker.model_validate_json(r[0]) for r in rows]
 
     # Results
 

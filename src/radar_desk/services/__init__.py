@@ -19,6 +19,7 @@ from radar_desk.services.fixtures import DEFAULT_ROOT, FixtureService
 from radar_desk.services.jobs import JobService
 from radar_desk.services.results import ResultService
 from radar_desk.services.scans import ScanService
+from radar_desk.services.workers import WorkerService
 from radar_desk.storage import Storage, make_storage
 
 __all__ = ["ServiceError", "Services", "build_services", "make_backend"]
@@ -37,6 +38,7 @@ class Services:
     jobs: JobService
     results: ResultService
     exports: ExportService
+    workers: WorkerService
 
     def scan_view(self, scan: str | Scan) -> dict:
         """A scan (record or id) as the API shows it: the record plus `latest_job`."""
@@ -54,6 +56,10 @@ def make_backend(settings: Any, db: Database, storage: Storage) -> Any:
         from radar_desk.gpu.modal_backend import ModalGpuBackend
 
         return ModalGpuBackend(settings)
+    if settings.gpu_backend == "worker":
+        from radar_desk.gpu.worker_backend import WorkerGpuBackend
+
+        return WorkerGpuBackend(db, storage)
     from radar_desk.gpu.fake import FakeGpuBackend, synthesize_result
 
     def synthesize(job_id: str) -> dict:
@@ -77,6 +83,7 @@ def build_services(
     backend = backend if backend is not None else make_backend(settings, db, storage)
     fixtures = FixtureService(fixtures_root)
     costs = CostService(db, settings)
+    results = ResultService(db, fixtures)
     return Services(
         settings=settings,
         db=db,
@@ -87,6 +94,7 @@ def build_services(
         costs=costs,
         scans=ScanService(db, storage, settings, fixtures),
         jobs=JobService(db, settings, backend, costs, clock=clock),
-        results=ResultService(db, fixtures),
+        results=results,
         exports=ExportService(db, storage, include_fake=getattr(backend, "name", None) == "fake"),
+        workers=WorkerService(db, settings, storage, results, clock=clock),
     )

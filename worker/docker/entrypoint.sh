@@ -3,8 +3,8 @@
 #
 # Runs scripts/ensure_weights.py (defaults fit a RunPod pod with the network volume at
 # /workspace; override with RADAR_WEIGHTS_DIR and RADAR_WEIGHTS_FALLBACK), exports the
-# directory it settled on as RADAR_WEIGHTS_RESOLVED, then runs the given command, or exits 0
-# when there is none (the worker loop comes later).
+# directory it settled on as RADAR_WEIGHTS_RESOLVED, then runs the given command (the image's
+# CMD is the pull worker, python3 -m radar_worker.pull), or exits 0 when there is none.
 set -eu
 
 APP_DIR="${RADAR_APP_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"

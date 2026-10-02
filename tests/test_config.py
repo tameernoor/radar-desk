@@ -10,7 +10,7 @@ from radar_desk.config import ConfigError, Settings, load_settings
 ENV_NAMES = [
     "OWNER_TOKEN", "SESSION_SECRET", "GPU_BACKEND", "MAX_UPLOAD_BYTES", "GPU_MONTHLY_BUDGET_USD",
     "RADAR_GPU", "MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET", "LLM_PROVIDER", "LLM_API_KEY", "LLM_BASE_URL", "DATA_DIR", "CHAT_MODEL",
-    "STORAGE_BACKEND", "MODAL_DATA_VOLUME", "S3_BUCKET",
+    "STORAGE_BACKEND", "MODAL_DATA_VOLUME", "S3_BUCKET", "WORKER_LEASE_S",
 ]
 
 
@@ -86,6 +86,14 @@ def test_invalid_value_error_does_not_echo_input(monkeypatch):
         load_settings(_env_file=None)
     assert "GPU_BACKEND" in str(info.value)
     assert "tok-secret-9999" not in str(info.value)
+
+
+def test_worker_lease_has_a_lower_bound(monkeypatch):
+    monkeypatch.setenv("OWNER_TOKEN", "o")
+    monkeypatch.setenv("SESSION_SECRET", "s")
+    monkeypatch.setenv("WORKER_LEASE_S", "5")
+    with pytest.raises(ConfigError, match="WORKER_LEASE_S"):
+        load_settings(_env_file=None)
 
 
 # Storage backend

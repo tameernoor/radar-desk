@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     aws_access_key_id: SecretStr | None = None
     aws_secret_access_key: SecretStr | None = None
 
-    gpu_backend: Literal["fake", "modal"] = "fake"
+    gpu_backend: Literal["fake", "modal", "worker"] = "fake"
     modal_token_id: SecretStr | None = None
     modal_token_secret: SecretStr | None = None
     modal_app_name: str = "radar-desk"
@@ -63,6 +63,8 @@ class Settings(BaseSettings):
     gpu_monthly_budget_usd: float = 10.0
     gpu_poll_interval_s: float = 10.0
     gpu_prices_usd_per_s: dict[str, float] = Field(default_factory=lambda: dict(DEFAULT_GPU_PRICES_USD_PER_S))
+    worker_lease_s: int = Field(default=120, ge=10)
+    worker_image: str = "radar-worker"
 
     llm_api_key: SecretStr | None = None
     llm_provider: Literal["openrouter", "ollama", "openai"] | None = None  # None means inferred from the URL
