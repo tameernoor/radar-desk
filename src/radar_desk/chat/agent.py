@@ -16,6 +16,7 @@ from typing import Any
 
 from radar_desk.chat.llm import LLM, Done, LlmError, OpenAICompatibleLLM, TextDelta, ToolCall
 from radar_desk.chat.prompt import system_prompt
+from radar_desk.chat.providers import StatusCache, llm_configured, provider_spec, unconfigured_message
 from radar_desk.chat.tools import TOOLS, ToolSpec, is_error, openai_tools, run_tool
 from radar_desk.chat.wire import Emitter
 from radar_desk.records import ChatExecution, new_id
@@ -23,7 +24,6 @@ from radar_desk.records import ChatExecution, new_id
 log = logging.getLogger(__name__)
 
 MAX_LLM_CALLS = 8
-UNCONFIGURED = "Chat is not configured: set LLM_API_KEY and CHAT_MODEL."
 CAP_TEXT = "I stopped after too many tool steps in this conversation. Ask again to continue."
 
 
@@ -32,11 +32,13 @@ class ChatNotFound(LookupError):
 
 
 def make_llm(settings: Any) -> LLM | None:
-    """The OpenAI-compatible client, or None when the key or the model name is missing."""
-    key = settings.llm_api_key
-    if key is None or not key.get_secret_value() or not settings.chat_model:
+    """The client for LLM_PROVIDER, or None without CHAT_MODEL or without a key the provider needs."""
+    if not llm_configured(settings):
         return None
-    return OpenAICompatibleLLM(settings.llm_base_url, key.get_secret_value(), settings.chat_model)
+    key = settings.llm_api_key.get_secret_value() if settings.llm_api_key else None
+    return OpenAICompatibleLLM(
+        settings.resolved_llm_base_url, key, settings.chat_model, provider=provider_spec(settings)
+    )
 
 
 def _text_of(content: Any) -> str:
@@ -108,8 +110,10 @@ class ChatAgent:
         tools: list[ToolSpec] = TOOLS,
         max_llm_calls: int = MAX_LLM_CALLS,
         emitter_options: dict | None = None,
+        status: StatusCache | None = None,
     ) -> None:
         self.services = services
+        self.status = status if status is not None else StatusCache(services.settings)
         self.llm = llm
         self.tools = tools
         self.max_llm_calls = max_llm_calls
@@ -124,7 +128,15 @@ class ChatAgent:
         emitter = self._emitter(new_id("exec"), 1, True)
         if self.llm is None:
             yield emitter.start()
-            yield emitter.error("chat_unconfigured", UNCONFIGURED)
+            spec = provider_spec(self.services.settings)
+            yield emitter.error("chat_unconfigured", unconfigured_message(spec))
+            return
+        # One provider check per dispatch, cached for 30 s, so the page sees "Ollama is not running"
+        # instead of a raw connection error. Skipped when the settings name no provider to check.
+        status = await self.status.get()
+        if status.configured and not status.ok:
+            yield emitter.start()
+            yield emitter.error("provider_unavailable", status.problem or "the chat model provider is unavailable")
             return
         ex: ChatExecution | None = None
         try:

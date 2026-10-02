@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { chatStatusNote } from "../src/chatstatus.js";
 
 const TOKEN = process.env.RADAR_OWNER_TOKEN || "dev-token";
 
@@ -57,6 +58,19 @@ test("workspace: findings, viewer, page tools, keys", async ({ page }) => {
     ),
   ).toBeVisible();
   await expect(page.getByText("Model: RADAR by Alibaba DAMO Academy, CC BY-NC-SA 4.0")).toBeVisible();
+
+  // The chat panel names its provider. The expected note comes from the same chatStatusNote the
+  // page uses, applied to what this server reports, so it holds with or without a configured model.
+  const chatNote = page.locator("[data-chat-status]");
+  const statusRes = await page.request.get("/chat/status");
+  expect(statusRes.status()).toBe(200);
+  const status = await statusRes.json();
+  const expected = chatStatusNote(status);
+  if (status.configured !== false && status.ok === false) {
+    await expect(chatNote).toContainText(status.problem || "The chat provider is not answering.");
+  } else {
+    await expect(chatNote).toHaveText(expected.text);
+  }
 
   // 146 findings once the result is in.
   await expect(page.locator('#findings[data-ready="true"] .finding')).toHaveCount(146, { timeout: 30_000 });

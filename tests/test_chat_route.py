@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import httpx
+
 from radar_desk.chat.llm import ToolCall
 from radar_desk.chat.wire import parse_frames
 from test_agent import FakeLLM, text_turn, tool_turn
@@ -67,3 +69,68 @@ def test_page_tool_await_and_resume(api):
 def test_resume_unknown_execution_is_404(api):
     resp = api.client.post("/chat/resume", json={"executionId": "exec_nope", "toolOutputs": {}})
     assert resp.status_code == 404
+
+
+def _status(api, handler):
+    api.app.state.chat_agent.status.transport = httpx.MockTransport(handler)
+    resp = api.client.get("/chat/status")
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+STATUS_KEYS = {"configured", "provider", "model", "base_url_host", "ok", "problem", "detail", "checked_at"}
+
+
+def test_chat_status_needs_login(api):
+    assert api.anon.get("/chat/status").status_code == 401
+
+
+def test_chat_status_unconfigured(api):
+    def boom(request):
+        raise AssertionError("no request expected")
+
+    out = _status(api, boom)
+    assert set(out) == STATUS_KEYS
+    assert out["configured"] is False and out["ok"] is False
+    assert out["provider"] == "openrouter" and out["model"] is None
+
+
+def test_chat_status_openrouter(make_api):
+    api = make_api(llm_api_key="sk-secret", chat_model="org/model")
+    out = _status(api, lambda r: httpx.Response(200, json={"data": {"limit_remaining": 3, "is_free_tier": False}}))
+    assert out["configured"] and out["ok"] and out["base_url_host"] == "openrouter.ai"
+    assert out["detail"] == {"limit_remaining": 3, "is_free_tier": False}
+    assert "sk-secret" not in api.client.get("/chat/status").text
+
+
+def test_chat_status_problems(make_api):
+    api = make_api(llm_api_key="k", chat_model="m")
+    assert _status(api, lambda r: httpx.Response(401))["problem"] == "the OpenRouter key was rejected"
+    api = make_api(llm_api_key="k", chat_model="m")
+    out = _status(api, lambda r: httpx.Response(200, json={"data": {"limit_remaining": 0}}))
+    assert out["problem"] == "this key's OpenRouter credit limit is used up"
+
+
+def test_chat_status_ollama(make_api):
+    def down(request):
+        raise httpx.ConnectError("refused", request=request)
+
+    api = make_api(llm_provider="ollama", chat_model="qwen3:8b")
+    out = _status(api, down)
+    assert out["provider"] == "ollama" and out["problem"] == "Ollama is not running at localhost:11434"
+    api = make_api(llm_provider="ollama", chat_model="qwen3:8b")
+    out = _status(api, lambda r: httpx.Response(200, json={"models": [{"name": "llama3.2:latest"}]}))
+    assert out["problem"] == "model qwen3:8b is not pulled; run `ollama pull qwen3:8b`"
+
+
+def test_chat_status_is_cached(make_api):
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, json={"data": {}})
+
+    api = make_api(llm_api_key="k", chat_model="m")
+    first = _status(api, handler)
+    second = api.client.get("/chat/status").json()
+    assert first["checked_at"] == second["checked_at"] and len(calls) == 1

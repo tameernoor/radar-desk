@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from radar_desk.chat.agent import UNCONFIGURED, ChatAgent, ChatNotFound, make_llm
+from radar_desk.chat.agent import ChatAgent, ChatNotFound, make_llm
 from radar_desk.chat.llm import Done, LlmError, OpenAICompatibleLLM, TextDelta, ToolCall
 from radar_desk.chat.prompt import system_prompt
 from radar_desk.chat.tools import TOOLS
@@ -284,7 +284,10 @@ async def test_unconfigured_chat(seeded):
     svc, scan, job = seeded
     frames = await run(ChatAgent(svc, None).dispatch(body(scan.id, job.id)))
     assert events(frames) == ["execution_start", "execution_error"]
-    assert frames[1]["data"]["error"] == {"code": "chat_unconfigured", "message": UNCONFIGURED}
+    assert frames[1]["data"]["error"] == {
+        "code": "chat_unconfigured",
+        "message": "Chat is not configured: set CHAT_MODEL and, for OpenRouter, LLM_API_KEY.",
+    }
 
 
 def test_make_llm(make_services):

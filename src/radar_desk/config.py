@@ -65,7 +65,8 @@ class Settings(BaseSettings):
     gpu_prices_usd_per_s: dict[str, float] = Field(default_factory=lambda: dict(DEFAULT_GPU_PRICES_USD_PER_S))
 
     llm_api_key: SecretStr | None = None
-    llm_base_url: str = "https://openrouter.ai/api/v1"
+    llm_provider: Literal["openrouter", "ollama", "openai"] | None = None  # None means inferred from the URL
+    llm_base_url: str | None = None  # None means the provider's default
     chat_model: str | None = None
 
     max_upload_bytes: int = 314_572_800
@@ -74,6 +75,20 @@ class Settings(BaseSettings):
     def gpu_list(self) -> list[str]:
         """RADAR_GPU as an ordered list, so "L4,A10" gives ["L4", "A10"]."""
         return [g.strip() for g in self.radar_gpu.split(",") if g.strip()]
+
+    @property
+    def resolved_llm_provider(self) -> str:
+        """LLM_PROVIDER when set, else inferred from LLM_BASE_URL (see chat/providers.py)."""
+        from radar_desk.chat.providers import resolved_provider_name
+
+        return resolved_provider_name(self)
+
+    @property
+    def resolved_llm_base_url(self) -> str:
+        """LLM_BASE_URL when set, else the default base URL of LLM_PROVIDER."""
+        from radar_desk.chat.providers import resolved_base_url
+
+        return resolved_base_url(self)
 
     @property
     def db_path(self) -> Path:

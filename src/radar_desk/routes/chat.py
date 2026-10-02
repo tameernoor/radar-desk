@@ -1,4 +1,4 @@
-"""persona chat endpoints: dispatch and resume, both streaming wire frames."""
+"""persona chat endpoints: dispatch and resume, both streaming wire frames, and the provider status."""
 
 from __future__ import annotations
 
@@ -29,6 +29,12 @@ def _stream(frames) -> StreamingResponse:
 async def chat(request: Request) -> StreamingResponse:
     body = await _body(request)
     return _stream(request.app.state.chat_agent.dispatch(body))
+
+
+@router.get("/status")
+async def status(request: Request) -> dict:
+    """The model provider's health, checked at most every 30 s. Never contains the key."""
+    return (await request.app.state.chat_agent.status.get()).to_dict()
 
 
 @router.post("/resume")

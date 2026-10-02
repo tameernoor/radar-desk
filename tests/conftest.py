@@ -22,6 +22,16 @@ FIXTURE_FILES = {
 }
 
 
+LLM_ENV = ("LLM_PROVIDER", "LLM_BASE_URL", "LLM_API_KEY", "CHAT_MODEL")
+
+
+@pytest.fixture(autouse=True)
+def no_llm_env(monkeypatch):
+    """A developer's shell settings must not make a test configure chat and run a real provider check."""
+    for name in LLM_ENV:
+        monkeypatch.delenv(name, raising=False)
+
+
 @pytest.fixture(scope="session")
 def repo_root() -> Path:
     return ROOT
