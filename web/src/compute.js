@@ -32,6 +32,15 @@ export function computePhrase(s, nowMs) {
   return { text, tone };
 }
 
+// The address workers use to reach this app: the managed quick tunnel of the open pod, or the fixed
+// WORKER_PUBLIC_URL. Null when there is none to show.
+export function workerUrl(s) {
+  if (s.mode !== "worker") return null;
+  if (s.tunnel_mode === "external" && s.public_url) return { url: s.public_url, label: "Worker URL", note: "fixed" };
+  if (s.pod?.tunnel_url) return { url: s.pod.tunnel_url, label: "Tunnel", note: s.pod.tunnel_alive === false ? "down" : "managed" };
+  return null;
+}
+
 // The scans strip's GET /gpu/status body in the shape computePhrase reads.
 export function fromGpuStatus(g, scanName = shortId) {
   return {

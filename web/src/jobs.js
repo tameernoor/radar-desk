@@ -1,6 +1,6 @@
 import "./styles.css";
 import { ApiError, api, del, get, post } from "./api.js";
-import { computePhrase } from "./compute.js";
+import { computePhrase, workerUrl } from "./compute.js";
 import { el, elapsed, shortId, usd, when } from "./format.js";
 import { wireLogout } from "./login.js";
 
@@ -137,6 +137,12 @@ function renderCompute(c) {
   const line = document.getElementById("compute-line");
   line.textContent = text;
   line.dataset.tone = tone;
+  const w = workerUrl(c);
+  const tunnel = document.getElementById("compute-tunnel");
+  tunnel.hidden = !w;
+  if (w) {
+    tunnel.replaceChildren(`${w.label}: `, Object.assign(document.createElement("a"), { href: w.url, textContent: w.url, target: "_blank", rel: "noopener" }), ` (${w.note})`);
+  }
   for (const input of document.querySelectorAll('input[name="compute-mode"]')) {
     input.checked = input.value === c.mode; // also snaps a radio back while a switch waits for its confirmation
     input.disabled = !c.changeable;

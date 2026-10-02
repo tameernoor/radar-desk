@@ -1,6 +1,6 @@
 // Unit tests for src/compute.js. Playwright runs these in Node; no browser is opened.
 import { expect, test } from "@playwright/test";
-import { computePhrase, fromGpuStatus } from "../src/compute.js";
+import { computePhrase, fromGpuStatus, workerUrl } from "../src/compute.js";
 
 const NOW = Date.parse("2026-10-02T12:00:00Z");
 const at = (secondsAgo) => new Date(NOW - secondsAgo * 1000).toISOString();
@@ -89,4 +89,13 @@ test("the scans strip's gpu_status maps onto the same phrase", () => {
 test("mode modal with a pod still draining names the pod", () => {
   const g = { backend: "modal", compute_mode: "modal", runpod_configured: true, gpu_requested: ["L4"], pod: pod({ phase: "ready", stops_in_s: 0 }), in_flight: null, queued: [], held: [] };
   expect(computePhrase(fromGpuStatus(g), NOW)).toEqual({ text: "Pod rp123, NVIDIA L4, $0.39/h, idle, stops in 0 min", tone: "busy" });
+});
+
+test("worker URL: managed tunnel of the pod, fixed URL, nothing on modal", () => {
+  const managed = { ...base, tunnel_mode: "managed", pod: pod({ tunnel_url: "https://a-b-c.trycloudflare.com", tunnel_alive: true }) };
+  expect(workerUrl(managed)).toEqual({ url: "https://a-b-c.trycloudflare.com", label: "Tunnel", note: "managed" });
+  expect(workerUrl({ ...managed, pod: { ...managed.pod, tunnel_alive: false } }).note).toBe("down");
+  expect(workerUrl({ ...base, tunnel_mode: "managed", pod: null })).toBeNull();
+  expect(workerUrl({ ...base, tunnel_mode: "external", public_url: "https://radar.example.org" })).toEqual({ url: "https://radar.example.org", label: "Worker URL", note: "fixed" });
+  expect(workerUrl({ ...managed, mode: "modal" })).toBeNull();
 });
