@@ -25,7 +25,7 @@ from radar_desk.compute.tunnel import TunnelError
 from radar_desk.records import Job, PodRecord
 from radar_desk.services.costs import iso_at, job_backend, month_of, parse_iso, price_per_s, worst_case
 from radar_desk.services.errors import ServiceError
-from radar_desk.storage import storage_backend
+from radar_desk.storage import describe_storage, storage_backend
 
 log = logging.getLogger(__name__)
 
@@ -72,6 +72,34 @@ def mode_refusal(settings: Any, mode: str) -> str | None:
     if mode == "serverless" and storage in ("local", "modal_volume"):
         return SERVERLESS_NEEDS_STORAGE
     return None
+
+
+# (mode, condition, note, reason); the first matching row wins, see mode_availability.
+UNAVAILABLE = (
+    ("modal", lambda s, b: b == "local", "not on local storage",
+     "Modal cannot reach a local folder; this app stores scans under DATA_DIR"),
+    ("modal", lambda s, b: b == "runpod_volume", "not on the RunPod volume",
+     "Modal cannot reach the RunPod volume; it has no presigned URLs"),
+    ("serverless", lambda s, b: b == "local", "needs a shared bucket",
+     "Serverless needs a shared bucket or the RunPod volume; this app stores scans in a local folder"),
+    ("serverless", lambda s, b: b == "modal_volume", "needs a shared bucket",
+     "Serverless needs a shared bucket or the RunPod volume; this app stores scans on the Modal volume"),
+    ("serverless", lambda s, b: not s.runpod_api_key, "no RunPod key", "RunPod keys missing; set RUNPOD_API_KEY"),
+    ("serverless", lambda s, b: not s.runpod_endpoint_id, "no endpoint",
+     "No endpoint configured; run scripts/runpod_endpoint.py create and set RUNPOD_ENDPOINT_ID"),
+)
+
+
+def mode_availability(settings: Any) -> dict:
+    """Per mode, whether it can run on this storage and config, with a short note and a reason when not.
+    Agrees with mode_refusal; worker is always available, pull workers go through the app."""
+    backend = storage_backend(settings)
+    modes = {}
+    for mode in MODES:
+        row = next((r for r in UNAVAILABLE if r[0] == mode and r[1](settings, backend)), None)
+        modes[mode] = ({"available": False, "reason": row[3], "note": row[2]} if row
+                       else {"available": True, "reason": None, "note": None})
+    return modes
 
 
 def _ts(value: str | None) -> float | None:
@@ -239,6 +267,8 @@ class ComputeService:
                 "spend_month_usd": round(self.costs.spend_for_month(month, now), 6),
                 "budget_usd": s.gpu_monthly_budget_usd,
                 "month": month,
+                "storage": {"backend": storage_backend(s), "name": describe_storage(s),
+                            "modes": mode_availability(s)},
             }
 
     def serverless_view(self) -> dict:

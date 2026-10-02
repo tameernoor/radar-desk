@@ -507,3 +507,38 @@ def test_browser_via_api_only_on_the_volume_adapters(local, mv, s3):
     assert mv.browser_via_api is True
     assert getattr(local, "browser_via_api", False) is False
     assert getattr(s3[0], "browser_via_api", False) is False
+
+
+# describe_storage and the backend override
+
+
+@pytest.mark.parametrize("over,name", [
+    ({"s3_bucket": "radar-desk-data", "s3_endpoint_url": "https://fly.storage.tigris.dev"},
+     "Tigris bucket radar-desk-data"),
+    ({"s3_bucket": "b", "s3_endpoint_url": "https://s3.example.com:9000/x"}, "S3 bucket b (s3.example.com)"),
+    ({"s3_bucket": "b", "s3_endpoint_url": "https://nottigris.dev"}, "S3 bucket b (nottigris.dev)"),
+    ({"s3_bucket": "b"}, "S3 bucket b"),
+    ({"storage_backend": "modal_volume"}, "Modal volume radar-data-x"),
+    ({"storage_backend": "runpod_volume"}, f"RunPod volume {RUNPOD_BUCKET} (EU-RO-1)"),
+    ({}, "Local folder"),
+])
+def test_describe_storage(over, name):
+    from radar_desk.storage import describe_storage
+
+    base = {"storage_backend": None, "s3_bucket": None, "s3_endpoint_url": None, "modal_data_volume": "radar-data-x",
+            "runpod_volume_id": RUNPOD_BUCKET, "runpod_datacenter": "EU-RO-1"}
+    assert describe_storage(SimpleNamespace(**{**base, **over})) == name
+
+
+def test_make_storage_backend_overrides_the_setting(tmp_path: Path):
+    from radar_desk.storage import ModalVolumeStorage, RunPodVolumeStorage
+
+    s = _runpod_settings(tmp_path, storage_backend=None, s3_endpoint_url="https://example.invalid", s3_region="auto",
+                         aws_access_key_id="AKIDUMMY", aws_secret_access_key="dummysecret",
+                         modal_data_volume="radar-data", modal_token_id=None, modal_token_secret=None)
+    assert type(make_storage(s, backend="local")) is LocalStorage
+    assert type(make_storage(s, backend="s3")) is S3Storage
+    assert isinstance(make_storage(s, backend="runpod_volume"), RunPodVolumeStorage)
+    volume = make_storage(s, backend="modal_volume")
+    assert isinstance(volume, ModalVolumeStorage) and volume._volume is None
+    assert type(make_storage(s)) is S3Storage  # s3_bucket is set and STORAGE_BACKEND is not

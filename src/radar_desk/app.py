@@ -41,7 +41,7 @@ from radar_desk.routes import (
 from radar_desk.routes.health import VERSION
 from radar_desk.services import ServiceError, Services, build_services
 from radar_desk.services.compute import MODAL_ON_LOCAL, MODAL_ON_VOLUME, SERVERLESS_FALLBACK, mode_refusal
-from radar_desk.storage import LocalStorage, storage_backend
+from radar_desk.storage import LocalStorage, describe_storage, storage_backend
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +59,7 @@ def create_app(settings: Any = None, services: Services | None = None, start_pol
         if refusal:
             raise ConfigError(refusal if settings.gpu_backend == "modal" else f"GPU_BACKEND=serverless: {refusal}")
     services = services if services is not None else build_services(settings)
+    log.info("storage: %s (%s)", describe_storage(settings), storage_backend(settings))
     mode = services.compute.mode if services.compute.changeable else None
     if mode in ("modal", "serverless") and mode_refusal(settings, mode):
         # Refusing would leave the owner no way to switch back.

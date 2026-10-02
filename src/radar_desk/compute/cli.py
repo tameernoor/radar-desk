@@ -60,6 +60,10 @@ def compute_lines(c: dict) -> list[str]:
     if c.get("problem"):
         lines.append(f"problem: {c['problem']}")
     lines.append(f"spend: ${c['spend_month_usd']:.2f} of ${c['budget_usd']:.2f} in {c['month']}")
+    storage = c.get("storage")
+    if storage:
+        modes = ", ".join(f"{m} {'yes' if v['available'] else 'no'}" for m, v in storage["modes"].items())
+        lines.append(f"storage: {storage['name']}, {storage['backend']}; {modes}")
     return lines
 
 

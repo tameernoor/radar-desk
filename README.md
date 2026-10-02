@@ -19,7 +19,7 @@ A score is how close an organ looks to a finding's text, not a calibrated probab
 
 ## How it works
 
-The browser uploads to a FastAPI server, which stores the scan on a Modal Volume. A Modal function on an L4 GPU runs DAMO's own PyTorch code and checkpoint, unedited, and writes the scores and the organ mask back to the Volume. The viewer (NiiVue) reads them through the API. The chat panel is persona, backed by any OpenAI-compatible model. `LLM_PROVIDER` picks OpenRouter (the default), a local Ollama or another endpoint.
+A FastAPI server takes the upload, and the scan goes to a shared S3-compatible bucket (or a volume). A Modal function on an L4 GPU runs DAMO's own PyTorch code and checkpoint, unedited, and writes the scores and the organ mask back to the same storage. The viewer (NiiVue) reads them through the API. The chat panel is persona, backed by any OpenAI-compatible model. `LLM_PROVIDER` picks OpenRouter (the default), a local Ollama or another endpoint.
 
 ## Results
 
@@ -44,6 +44,8 @@ uv run python -m radar_desk
 ```
 
 Open http://127.0.0.1:8000 and log in with your `OWNER_TOKEN`. With `GPU_BACKEND=fake` it runs without a GPU and makes up clearly marked results. `.env.example` explains every setting.
+
+The recommended setup is one S3-compatible bucket for scans and results, which every compute mode can use. Set `S3_BUCKET` and the four `S3_*` and `AWS_*` keys from `.env.example`, leave `STORAGE_BACKEND` unset, and allow the app's origin in the bucket's CORS rules, because the browser uploads to it directly. The jobs page says which storage is in use under the Compute choice. To move existing scans and results off a volume, run `uv run python scripts/migrate_storage.py --from modal_volume --to s3 --dry-run`, then again without `--dry-run`.
 
 Any NVIDIA machine can score instead of Modal. Set `GPU_BACKEND=worker`, create a worker token on the jobs page, build `worker/docker/Dockerfile` and run `docker run --gpus all -v /workspace:/workspace -e RADAR_DESK_URL=<app url> -e RADAR_WORKER_TOKEN=<token> radar-worker`; the weights are fetched to `/workspace/radar-weights` on first start.
 
