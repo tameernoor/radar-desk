@@ -2,8 +2,8 @@
 
 Missing paths raise what the installed client raises. `listdir` raises
 `modal.exception.NotFoundError`, because the server answers NOT_FOUND and
-`modal/_grpc_client.py` maps that status to NotFoundError. `read_file` and `remove_file`
-raise `FileNotFoundError` (`modal/volume.py`, read_file and remove_file). A batch that would
+`modal/_grpc_client.py` maps that status to NotFoundError. `read_file`
+raises `FileNotFoundError`; `remove_file` raises `InvalidError("No such file or directory.")` (modal 1.6, seen live). A batch that would
 overwrite a file without `force` raises `FileExistsError` on exit and writes nothing, as the
 real batch sends one VolumePutFiles request. Entry paths carry no leading slash, as in
 `modal/cli/_download.py`.
@@ -56,7 +56,10 @@ class FakeVolume:
     def remove_file(self, path: str, recursive: bool = False) -> None:
         p = self._norm(path)
         if p not in self.sizes:
-            raise FileNotFoundError(path)
+            # What modal 1.6 really raises for a missing path (seen live on 2026-10-02).
+            from modal.exception import InvalidError
+
+            raise InvalidError("No such file or directory.")
         for d in (self.files, self.sizes, self.sha256):
             d.pop(p, None)
 
