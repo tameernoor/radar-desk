@@ -20,3 +20,6 @@ web/.smoke-out/
 # Internal design notes
 docs/
 worker/.venv/
+
+# Personal spot-check notes, kept local
+fixtures/expected/tally.json
