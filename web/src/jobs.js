@@ -115,6 +115,7 @@ async function load() {
 
 let compute = null; // the last GET /compute body
 let gpus = []; // the Modal GPUs requested, for the phrase
+let workerList = null; // the last GET /workers list, for the online count in the phrase
 
 // The confirmation sentence names a mode that can be chosen, so its label has no note.
 const modeLabel = (mode) => modeControl(compute, mode).label;
@@ -134,7 +135,8 @@ function renderCompute(c) {
   compute = c;
   const jobId = c.pod?.job_id || c.in_flight?.job_id;
   const job = jobId && jobs.find((j) => j.id === jobId);
-  const { text, tone } = computePhrase({ ...c, gpus, scan: job && scanNames.get(job.scan_id) }, Date.now());
+  const workers_online = workerList ? workerList.filter((w) => w.online).length : undefined;
+  const { text, tone } = computePhrase({ ...c, gpus, workers_online, scan: job && scanNames.get(job.scan_id) }, Date.now());
   const line = document.getElementById("compute-line");
   line.textContent = text;
   line.dataset.tone = tone;
@@ -156,8 +158,19 @@ function renderCompute(c) {
   storage.hidden = !c.storage;
   storage.textContent = c.storage ? `Storage: ${c.storage.name} (used by all modes)` : "";
   document.getElementById("compute-fixed").hidden = c.changeable;
-  document.getElementById("pod-start").hidden = !(c.mode === "worker" && c.runpod.configured && !c.pod);
-  document.getElementById("pod-stop").hidden = !c.pod;
+  document.getElementById("pod-start").hidden = !(c.mode === "runpod" && c.runpod.configured && !c.pod);
+  document.getElementById("pod-stop").hidden = !c.pod; // a pod draining after a switch can still be stopped
+  document.getElementById("workers-intro").hidden = c.mode !== "worker";
+  placeWorkers(c.mode);
+}
+
+// In mode worker the Workers section sits under Compute; otherwise below Jobs. Moved only when the order is wrong.
+function placeWorkers(mode) {
+  const workers = document.querySelector('section[aria-labelledby="workers-title"]');
+  const jobsSection = document.querySelector('section[aria-labelledby="jobs-title"]');
+  const above = Boolean(workers.compareDocumentPosition(jobsSection) & Node.DOCUMENT_POSITION_FOLLOWING);
+  if (mode === "worker" && !above) jobsSection.before(workers);
+  else if (mode !== "worker" && above) jobsSection.after(workers);
 }
 
 function chooseMode(input) {
@@ -165,7 +178,8 @@ function chooseMode(input) {
   const job = compute?.in_flight;
   if (job && !input.dataset.armed) {
     input.dataset.armed = "1";
-    const where = { modal: "Modal", worker: modeLabel("worker"), serverless: "RunPod serverless", fake: "the fake backend" }[job.backend] || job.backend;
+    // A job's backend is worker whichever pull mode claimed it.
+    const where = { modal: "Modal", worker: "its worker", runpod: "its worker", serverless: "RunPod serverless", fake: "the fake backend" }[job.backend] || job.backend;
     input.parentElement.querySelector("[data-label]").textContent =
       `Switch to ${modeLabel(input.value)}? Job ${shortId(job.job_id)} finishes on ${where}`;
     setTimeout(() => {
@@ -273,6 +287,8 @@ async function loadWorkers() {
   const r = await workerAct(get("/workers"));
   if (!r) return;
   runTarget = r;
+  workerList = r.workers;
+  if (compute) renderCompute(compute); // keep the online count in the compute line current
   renderRunLine();
   document.querySelector("#workers-table tbody").replaceChildren(...r.workers.map(workerRow));
   document.getElementById("workers-empty").hidden = r.workers.length > 0;

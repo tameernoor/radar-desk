@@ -1,4 +1,4 @@
-"""GPU_BACKEND=worker: pull workers claim jobs from the app's job desk (services/workers.py).
+"""The pull modes worker and runpod: pull workers claim jobs from the app's job desk (services/workers.py).
 
 Nothing is spawned or polled here; the poller sees `pull` and runs the desk's tick instead. Worker jobs are
 not priced. Cancel is a no-op: the job is cancelled in the database and the worker's next lease-bound call

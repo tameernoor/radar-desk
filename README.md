@@ -19,7 +19,7 @@ A score is how close an organ looks to a finding's text, not a calibrated probab
 
 ## How it works
 
-A FastAPI server takes the upload, and the scan goes to a shared S3-compatible bucket (or a volume). A GPU runs DAMO's own PyTorch code and checkpoint, unedited, and writes the scores and the organ mask back to the same storage. The GPU is one of three, chosen on the jobs page: a Modal function, a RunPod pod running the pull worker, or a RunPod serverless endpoint. The viewer (NiiVue) reads them through the API. The chat panel is persona, backed by any OpenAI-compatible model. `LLM_PROVIDER` picks OpenRouter (the default), a local Ollama or another endpoint.
+A FastAPI server takes the upload, and the scan goes to a shared S3-compatible bucket (or a volume). A GPU runs DAMO's own PyTorch code and checkpoint, unedited, and writes the scores and the organ mask back to the same storage. The GPU is one of four, chosen on the jobs page: a Modal function, your own NVIDIA machine running the pull worker, a RunPod pod the app starts, or a RunPod serverless endpoint. The viewer (NiiVue) reads them through the API. The chat panel is persona, backed by any OpenAI-compatible model. `LLM_PROVIDER` picks OpenRouter (the default), a local Ollama or another endpoint.
 
 ## Results
 
@@ -49,11 +49,17 @@ Open http://127.0.0.1:8000 and log in with your `OWNER_TOKEN`. With `GPU_BACKEND
 
 The recommended setup is one S3-compatible bucket for scans and results, which every compute mode can use. Set `S3_BUCKET` and the four `S3_*` and `AWS_*` keys from `.env.example`, leave `STORAGE_BACKEND` unset, and allow the app's origin in the bucket's CORS rules, because the browser uploads to it directly. The jobs page says which storage is in use under the Compute choice. To move existing scans and results off a volume, run `uv run python scripts/migrate_storage.py --from modal_volume --to s3 --dry-run`, then again without `--dry-run`.
 
-Any NVIDIA machine can score instead of Modal. Set `GPU_BACKEND=worker`, create a worker token on the jobs page, build `worker/docker/Dockerfile` and run `docker run --gpus all -v /workspace:/workspace -e RADAR_DESK_URL=<app url> -e RADAR_WORKER_TOKEN=<token> radar-worker`; the weights are fetched to `/workspace/radar-weights` on first start.
+## Run on your own GPU
 
-The Compute choice at the top of the jobs page moves scoring between Modal, a RunPod pod and RunPod serverless without a restart. On a RunPod pod the app starts one pod when a job is queued and the pod deletes itself after 10 idle minutes; it needs `WORKER_IMAGE` and the `RUNPOD_*` keys from `.env.example`. `RUNPOD_GPUS` sets which GPU types to try, in order.
+Pick Own GPU workers on the jobs page (or set `GPU_BACKEND=worker` before the first start). The app then only queues jobs and waits for a worker; it never starts a RunPod pod. Create a worker token on the jobs page, then on the GPU machine run `docker run --gpus all -v <weights dir>:/workspace -e RADAR_DESK_URL=<app url> -e RADAR_WORKER_TOKEN=<token> <image>`. The jobs page shows the exact line with this app's URL. The image is `WORKER_IMAGE`, built from `worker/docker/Dockerfile`, and the weights are fetched into `<weights dir>/radar-weights` on first start. The worker must be able to reach the app, on the same network, through a tunnel, or at `WORKER_PUBLIC_URL`.
 
-The pod reaches the app through `WORKER_PUBLIC_URL`, which the app only checks, or, when that is unset, through a Cloudflare quick tunnel the app starts and stops itself. `uv run python -m radar_desk.compute runpod [--start]|modal|serverless|stop|status` does the same from a terminal.
+What is tested. The worker image and code are the same that ran on RunPod RTX 4090 and L4 pods, with scores identical to Modal, but they have not been run on a home or on-prem NVIDIA machine. It needs a 24 GB NVIDIA card (measured peak 15 to 20 GB). On an Apple GPU, `scripts/score_local.py --device mps` gives correct scores but needs about 32 GB of unified memory in practice (a 16 GB M5 took 16 minutes, swapping). CPU works and is slow.
+
+## Compute
+
+The Compute choice at the top of the jobs page moves scoring between Modal, your own workers, a RunPod pod and RunPod serverless without a restart. In RunPod pod mode the app starts one pod when a job is queued and the pod deletes itself after 10 idle minutes; it needs `WORKER_IMAGE` and the `RUNPOD_*` keys from `.env.example`. `RUNPOD_GPUS` sets which GPU types to try, in order.
+
+The pod reaches the app through `WORKER_PUBLIC_URL`, which the app only checks, or, when that is unset, through a Cloudflare quick tunnel the app starts and stops itself. `uv run python -m radar_desk.compute workers|runpod [--start]|modal|serverless|stop|status` does the same from a terminal.
 
 RunPod serverless submits each job to an endpoint that scales to zero, with no tunnel and no pod to manage; the scans and artefacts sit on the RunPod network volume (`STORAGE_BACKEND=runpod_volume`) or in the S3 bucket. Pin `WORKER_IMAGE` to a `worker-vX.Y` tag, create the endpoint once with `uv run python scripts/runpod_endpoint.py create`, put the printed `RUNPOD_ENDPOINT_ID` in `.env`, and pick `RunPod serverless` on the jobs page.
 

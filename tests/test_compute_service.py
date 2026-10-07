@@ -19,14 +19,18 @@ from radar_desk.services import build_services
 from radar_desk.services.compute import (
     FIXED,
     HEALTH_DOWN,
+    MIGRATED,
     MODAL_NEEDS_STORAGE,
     MODAL_ON_RUNPOD_VOLUME,
     POD_FAILED,
     QUEUE_WARNING,
+    RUNPOD_NEEDS_CONFIG,
     SERVERLESS_NEEDS_CONFIG,
     SERVERLESS_NEEDS_STORAGE,
     TUNNEL_DIED,
     UNREACHABLE,
+    mode_availability,
+    mode_refusal,
 )
 from radar_desk.services.costs import parse_iso
 from radar_desk.services.errors import ServiceError
@@ -139,7 +143,7 @@ class Probe:
 
     def __call__(self, url: str) -> dict | None:
         self.calls.append(url)
-        return {"ok": True, "backend": "worker", "version": "x"} if self.up else None
+        return {"ok": True, "backend": "runpod", "version": "x"} if self.up else None
 
 
 class World:
@@ -152,7 +156,7 @@ class World:
         self.sleeps: list[float] = []
         # s3 in the settings so the modal mode is allowed; the bytes still go to local storage.
         base = {"owner_token": OWNER, "session_secret": "s", "data_dir": tmp_path / "data",
-                "gpu_backend": "worker",
+                "gpu_backend": "runpod",
                 "runpod_api_key": "rp-key", "runpod_volume_id": "vol-1", "runpod_registry_auth_id": "reg-1",
                 "worker_image": IMAGE, "storage_backend": "s3", "s3_bucket": "b"}
         self.settings = Settings(_env_file=None, **{**base, **overrides})
@@ -233,8 +237,8 @@ def world(tmp_path):
 
 def test_mode_is_seeded_from_gpu_backend_and_set_mode_refuses(tmp_path, make_services):
     w = World(tmp_path)
-    assert w.compute.mode == "worker" and w.compute.changeable
-    assert w.svc.db.get_setting("mode") == "worker"
+    assert w.compute.mode == "runpod" and w.compute.changeable
+    assert w.svc.db.get_setting("mode") == "runpod"
     body = w.compute.set_mode("modal")
     assert body["mode"] == "modal" and body["changed_at"] == "2026-10-15T12:00:00.000000Z"
     assert w.svc.backend.name == "modal" and w.svc.workers.mode() == "modal"
@@ -249,6 +253,8 @@ def test_mode_is_seeded_from_gpu_backend_and_set_mode_refuses(tmp_path, make_ser
 
     modal = World(tmp_path / "modal", gpu_backend="modal")
     assert modal.compute.mode == "modal"
+    own = World(tmp_path / "own", gpu_backend="worker")
+    assert own.compute.mode == "worker" and own.svc.db.get_setting("mode") == "worker"
 
     fake = make_services()
     assert fake.compute.mode == "fake" and not fake.compute.changeable
@@ -260,7 +266,7 @@ def test_mode_is_seeded_from_gpu_backend_and_set_mode_refuses(tmp_path, make_ser
 def test_backends_are_built_on_first_use(world):
     assert world.compute._built == {}
     assert world.svc.backend.name == "worker"
-    assert set(world.compute._built) == {"worker"}
+    assert set(world.compute._built) == {"runpod"}
 
 
 # Start paths
@@ -595,7 +601,7 @@ def test_pod_spend_in_gpu_status(world):
     world.ready()
     world.tick(3600)
     status = world.svc.gpu_status(world.clock())
-    assert status["compute_mode"] == "worker" and status["pod"]["runpod_id"] == "rp2"
+    assert status["compute_mode"] == "runpod" and status["pod"]["runpod_id"] == "rp2"
     assert status["price_per_hour_usd"] == 0.39 and status["runpod_configured"] is True
     assert status["problem"] is None
     assert status["spend_month_usd"] == pytest.approx(closed + 0.39, abs=1e-6)
@@ -612,14 +618,14 @@ def modal_stand_in(world) -> FakeGpuBackend:
     return backend
 
 
-def test_a_modal_job_is_collected_while_the_mode_is_worker(world):
+def test_a_modal_job_is_collected_while_the_mode_is_runpod(world):
     modal = modal_stand_in(world)
     world.compute.set_mode("modal")
     job_id = world.queue()
     poller = Poller(world.svc, clock=world.clock)
     poller.tick()
     assert world.job(job_id).state == "submitted" and world.job(job_id).backend == "modal"
-    world.compute.set_mode("worker")
+    world.compute.set_mode("runpod")
     modal.set_result(job_id, canned_result(job_id, gpu="NVIDIA L4"))
     world.clock.advance(100)
     poller.tick()
@@ -765,7 +771,7 @@ def test_a_claim_waits_while_a_modal_job_runs(world):
     world.compute.set_mode("modal")
     world.queue()
     Poller(world.svc, clock=world.clock).tick()
-    world.compute.set_mode("worker")
+    world.compute.set_mode("runpod")
     world.queue()
     world.compute.start_now()
     world.tick()
@@ -779,7 +785,7 @@ def test_the_budget_counts_modal_jobs_in_flight(tmp_path):
     w.compute.set_mode("modal")
     w.queue()
     Poller(w.svc, clock=w.clock).tick()
-    w.compute.set_mode("worker")
+    w.compute.set_mode("runpod")
     job_id = w.queue()
     w.tick()
     assert w.pod is None and w.job(job_id).hold_reason == "budget"
@@ -833,7 +839,7 @@ def test_set_mode_serverless_refusals(tmp_path):
         with pytest.raises(ServiceError) as info:
             w.compute.set_mode("serverless")
         assert info.value.status == 409 and info.value.detail == detail
-        assert w.compute.mode == "worker"
+        assert w.compute.mode == "runpod"
     w = World(tmp_path / "volume", runpod_endpoint_id=ENDPOINT, storage_backend="runpod_volume")
     with pytest.raises(ServiceError) as info:
         w.compute.set_mode("modal")
@@ -841,7 +847,7 @@ def test_set_mode_serverless_refusals(tmp_path):
     assert w.compute.set_mode("serverless")["mode"] == "serverless"
     with pytest.raises(ServiceError) as info:
         w.compute.set_mode("cloud")
-    assert info.value.detail == "unknown mode 'cloud'; use modal, worker or serverless"
+    assert info.value.detail == "unknown mode 'cloud'; use modal, worker, runpod or serverless"
 
 
 def test_the_poller_spawns_and_settles_through_serverless(tmp_path):
@@ -878,11 +884,11 @@ def test_no_serverless_spawn_while_a_modal_job_is_submitted(tmp_path):
     assert w.job(second).state == "queued" and endpoint.requests == []
 
 
-def test_a_serverless_job_finishes_after_a_switch_to_worker(tmp_path):
+def test_a_serverless_job_finishes_after_a_switch_to_runpod(tmp_path):
     w, endpoint, poller = serverless_world(tmp_path)
     job_id = w.queue()
     poller.tick()
-    w.compute.set_mode("worker")
+    w.compute.set_mode("runpod")
     endpoint.status = completed(canned_result(job_id, gpu="NVIDIA L4"))
     w.svc.storage.put_bytes(artefact_keys(job_id)["mask"], b"mask")
     w.clock.advance(100)
@@ -1027,3 +1033,194 @@ def test_serverless_attempt_cost(tmp_path):
     cancelled = w.svc.jobs.cancel(job_id)
     assert endpoint.paths()[-1] == f"POST /v2/{ENDPOINT}/cancel/{CALL}"
     assert cancelled.state == "cancelled" and cancelled.cost_estimate_usd == pytest.approx((100 + 60) * SLS)
+
+
+# Own workers (mode worker)
+
+
+def own_world(tmp_path, **overrides) -> World:
+    return World(tmp_path, gpu_backend="worker", **overrides)
+
+
+def own_claim(w: World, name: str = "mine") -> dict | None:
+    token, _plaintext = w.svc.workers.create_token(name)
+    return w.svc.workers.claim(token, {"id": "box-1", "gpu_name": "NVIDIA RTX 4090"})
+
+
+def test_mode_worker_never_deploys(tmp_path):
+    w = own_world(tmp_path)
+    w.rp.add("rp-stray")
+    job_id = w.queue()
+    for _ in range(5):
+        w.tick(60)
+    assert w.rp.deleted == ["rp-stray"]  # the tick ran its reconcile
+    assert w.pod is None and w.svc.db.list_pods() == []
+    assert w.tunnel.started == [] and w.rp.deployed == [] and w.rp.requested == []
+    assert w.compute.status()["problem"] is None
+    assert w.job(job_id).state == "queued" and w.job(job_id).hold_reason is None
+
+
+@pytest.mark.parametrize("mode", ["worker", "runpod"])
+def test_an_own_worker_claims_in_both_pull_modes(tmp_path, mode):
+    w = World(tmp_path, gpu_backend=mode)
+    job_id = w.queue()
+    claim = own_claim(w)
+    assert claim["job_id"] == job_id and w.rp.deployed == []
+    w.svc.workers.complete(job_id, claim["lease"], canned_result(job_id, gpu="NVIDIA RTX 4090"))
+    assert w.job(job_id).state == "done" and w.job(job_id).backend == "worker"
+
+
+def test_switch_runpod_to_worker_drains_and_stops_the_pod(world):
+    claim = world.ready()
+    token_id = world.pod.token_id
+    world.compute.set_mode("worker")
+    world.tick(5)
+    assert world.pod is not None  # its job is in flight
+    second = world.queue()
+    assert world.claim() is None  # the pod's worker no longer claims
+    world.finish(claim)
+    assert world.claim() is None and world.job(second).state == "queued"
+    world.tick(5)
+    assert world.pod is None and world.last().reason == "mode" and world.rp.deleted == ["rp1"]
+    assert world.svc.db.get_worker_token(token_id).revoked_at is not None
+    world.tick(60)
+    world.tick(60)
+    assert world.pod is None and len(world.rp.deployed) == 1
+    assert world.job(second).state == "queued" and world.job(second).hold_reason is None
+
+
+def test_an_own_worker_job_does_not_keep_a_draining_pod(world):
+    claim = world.ready()
+    world.compute.set_mode("worker")
+    second = world.queue()
+    world.finish(claim)
+    own = own_claim(world)
+    assert own["job_id"] == second
+    assert world.compute.pod_view()["job_id"] is None
+    world.tick(5)
+    assert world.pod is None and world.last().reason == "mode" and world.rp.deleted == ["rp1"]
+    assert world.job(second).state == "submitted"
+
+
+def test_an_own_worker_claims_while_a_pod_drains(world):
+    claim = world.ready()
+    world.compute.set_mode("worker")
+    second = world.queue()
+    own = own_claim(world)  # the pod row is open and its job still submitted
+    assert own["job_id"] == second
+    assert world.compute.pod_view()["job_id"] == claim["job_id"]
+    world.tick(5)
+    assert world.pod is not None  # the pod's own job is in flight
+    world.finish(claim)
+    assert world.compute.pod_view()["job_id"] is None
+    world.tick(5)
+    assert world.pod is None and world.last().reason == "mode"
+
+
+def test_a_silent_pod_worker_stops_while_an_own_worker_scores(world):
+    claim = world.ready()
+    world.finish(claim)
+    second = world.queue()
+    assert own_claim(world)["job_id"] == second
+    world.tick(120)
+    assert world.pod is not None
+    world.tick(1)
+    assert world.pod is None and world.last().reason == "worker_lost"
+    assert world.job(second).state == "submitted"
+
+
+@pytest.mark.parametrize("missing", ["runpod_api_key", "worker_image"])
+def test_set_mode_runpod_needs_runpod(tmp_path, missing):
+    w = own_world(tmp_path, **{missing: None})
+    with pytest.raises(ServiceError) as info:
+        w.compute.set_mode("runpod")
+    assert info.value.status == 409 and info.value.detail == RUNPOD_NEEDS_CONFIG
+    assert w.compute.mode == "worker"
+
+
+def test_start_now_is_refused_in_mode_worker(tmp_path):
+    w = own_world(tmp_path)
+    with pytest.raises(ServiceError) as info:
+        w.compute.start_now()
+    assert info.value.status == 409 and info.value.detail == "a pod starts only in mode runpod"
+
+
+def test_mode_worker_still_reconciles_and_deletes_strays(tmp_path):
+    w = own_world(tmp_path)
+    w.rp.add("rp-stray")
+    w.compute.reconcile_at_start()
+    assert w.rp.deleted == ["rp-stray"]
+    w.rp.add("rp-later")
+    w.tick(30)
+    assert w.rp.deleted == ["rp-stray", "rp-later"]
+
+
+def test_mode_worker_closes_a_vanished_pod(world):
+    world.ready()
+    world.compute.set_mode("worker")
+    world.rp.pods.clear()
+    world.tick(30)
+    assert world.pod is None and world.last().reason == "vanished" and world.rp.deleted == []
+
+
+# Migration of the stored mode
+
+
+def old_schema(w: World, mode: str) -> None:
+    """A database from before mode runpod: the mode stored, no marker."""
+    w.svc.db.set_setting("mode", mode)
+    w.svc.db.set_setting("mode_schema", None)
+
+
+def test_migrate_mode_turns_a_stored_worker_into_runpod_when_configured(world):
+    old_schema(world, "worker")
+    world.compute.migrate_mode()
+    assert world.compute.mode == "runpod" and world.svc.db.get_setting("mode_schema") == "2"
+    assert world.compute.status()["last_event"] == f"2026-10-15T12:00:00.000000Z {MIGRATED}"
+    world.compute.set_mode("worker")  # the owner chose own workers deliberately
+    world.compute.migrate_mode()
+    assert world.compute.mode == "worker"
+
+
+def test_migrate_mode_leaves_other_cases_alone(tmp_path):
+    w = World(tmp_path / "bare", runpod_api_key=None)
+    old_schema(w, "worker")
+    w.compute.migrate_mode()
+    assert w.compute.mode == "worker" and w.svc.db.get_setting("mode_schema") == "2"
+    assert w.svc.db.get_setting("last_event") is None
+
+    w = World(tmp_path / "modal")
+    old_schema(w, "modal")
+    w.compute.migrate_mode()
+    assert w.compute.mode == "modal" and w.svc.db.get_setting("mode_schema") == "2"
+
+    w = World(tmp_path / "unseeded", gpu_backend="worker")
+    w.svc.db.set_setting("mode", None)
+    w.svc.db.set_setting("mode_schema", None)
+    w.compute.migrate_mode()
+    assert w.svc.db.get_setting("mode") is None and w.svc.db.get_setting("mode_schema") == "2"
+    assert w.compute.mode == "worker"  # the first read seeds from GPU_BACKEND
+
+
+def test_a_fresh_gpu_backend_worker_stays_worker_with_runpod_configured(tmp_path):
+    """The services read the mode when built, so the seed already carries the marker."""
+    w = own_world(tmp_path)
+    assert w.svc.db.get_setting("mode") == "worker" and w.svc.db.get_setting("mode_schema") == "2"
+    w.compute.migrate_mode()
+    assert w.compute.mode == "worker" and w.svc.db.get_setting("last_event") is None
+
+
+def test_migrate_mode_writes_nothing_on_the_fake_backend(make_services):
+    fake = make_services()
+    fake.compute.migrate_mode()
+    assert fake.db.get_setting("mode_schema") is None and fake.db.get_setting("mode") is None
+
+
+@pytest.mark.parametrize("overrides", [{"runpod_api_key": None}, {"worker_image": None}, {}])
+def test_mode_availability_agrees_with_mode_refusal(tmp_path, overrides):
+    w = World(tmp_path, **overrides)
+    modes = mode_availability(w.settings)
+    assert list(modes) == ["modal", "worker", "runpod", "serverless"]
+    for mode in ("modal", "runpod", "serverless"):
+        assert modes[mode]["available"] == (mode_refusal(w.settings, mode) is None)
+    assert modes["worker"]["available"]

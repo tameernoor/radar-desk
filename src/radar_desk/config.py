@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     aws_access_key_id: SecretStr | None = None
     aws_secret_access_key: SecretStr | None = None
 
-    gpu_backend: Literal["fake", "modal", "worker", "serverless"] = "fake"
+    gpu_backend: Literal["fake", "modal", "worker", "runpod", "serverless"] = "fake"
     modal_token_id: SecretStr | None = None
     modal_token_secret: SecretStr | None = None
     modal_app_name: str = "radar-desk"

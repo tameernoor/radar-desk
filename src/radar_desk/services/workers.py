@@ -120,7 +120,8 @@ class WorkerService:
     def claim(self, token: WorkerToken, worker_info: dict) -> dict | None:
         """Claim the oldest queued job for this worker, or None when there is nothing to do.
 
-        Only in compute mode worker and while no other backend's job is submitted, so a worker never takes
+        Only in the pull modes (worker, runpod) and while no other backend's job is submitted; a pod's own
+        worker claims only in mode runpod, so a switch away from runpod drains the pod. A worker never takes
         a job another backend would spawn and jobs run one at a time. A job whose
         scan is gone or not ready is failed as input_error and the next one is tried.
         """
@@ -129,7 +130,11 @@ class WorkerService:
             now = self.clock()
             job = None
             others = any(job_backend(j) != "worker" for j in self.db.list_jobs(state="submitted", limit=100_000))
-            while self.mode() == "worker" and not others:  # one job at a time across backends
+            mode = self.mode()
+            pod = self.db.open_pod()
+            pod_worker = pod is not None and pod.token_id == token.id
+            claims = mode == "runpod" or (mode == "worker" and not pod_worker)
+            while claims and not others:  # one job at a time across backends
                 lease_id = f"wk_{secrets.token_hex(8)}"
                 lease = Lease(worker_id=worker_id, expires_at=iso_at(now + self.settings.worker_lease_s),
                               heartbeat_at=iso_at(now))

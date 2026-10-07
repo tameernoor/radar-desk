@@ -41,6 +41,7 @@ class FakeApp:
                 "storage": {"backend": "s3", "name": "Tigris bucket radar-desk-data", "modes": {
                     "modal": {"available": True, "reason": None, "note": None},
                     "worker": {"available": True, "reason": None, "note": None},
+                    "runpod": {"available": True, "reason": None, "note": None},
                     "serverless": {"available": False, "reason": "x", "note": "no endpoint"}}}}
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
@@ -94,10 +95,18 @@ def test_runpod_sets_the_mode(world, capsys):
     app, run, _ = world
     code, out, _ = run(capsys, "runpod")
     assert code == 0
-    assert app.calls == [("PUT", "/compute", {"mode": "worker"})]
-    assert "compute: mode worker, tunnel managed" in out
+    assert app.calls == [("PUT", "/compute", {"mode": "runpod"})]
+    assert "compute: mode runpod (RunPod pod), tunnel managed" in out
     assert "pod: none" in out
     assert "spend: $1.23 of $10.00 in 2026-10" in out
+
+
+def test_workers_sets_the_mode(world, capsys):
+    app, run, _ = world
+    code, out, _ = run(capsys, "workers")
+    assert code == 0
+    assert app.calls == [("PUT", "/compute", {"mode": "worker"})]
+    assert "compute: mode worker (Own GPU workers), tunnel managed" in out
 
 
 def test_runpod_start_asks_for_a_pod(world, capsys):
@@ -110,11 +119,11 @@ def test_runpod_start_asks_for_a_pod(world, capsys):
 
 def test_modal_sets_the_mode(world, capsys):
     app, run, _ = world
-    app.mode = "worker"
+    app.mode = "runpod"
     code, out, _ = run(capsys, "modal")
     assert code == 0
     assert app.calls == [("PUT", "/compute", {"mode": "modal"})]
-    assert "compute: mode modal" in out
+    assert "compute: mode modal (Modal)" in out
 
 
 def test_stop_stops_the_pod(world, capsys):
@@ -128,18 +137,18 @@ def test_stop_stops_the_pod(world, capsys):
 
 def test_status_prints_health_compute_and_workers(world, capsys):
     app, run, _ = world
-    app.mode, app.pod, app.problem = "worker", POD, "RunPod did not answer"
+    app.mode, app.pod, app.problem = "runpod", POD, "RunPod did not answer"
     code, out, _ = run(capsys, "status")
     assert code == 0
     assert out.splitlines() == [
-        "app: backend worker, version 1.2.3",
-        "compute: mode worker, tunnel managed",
+        "app: backend runpod, version 1.2.3",
+        "compute: mode runpod (RunPod pod), tunnel managed",
         "gpus: NVIDIA L4, NVIDIA GeForce RTX 4090 in EU-RO-1",
         "pod: rp123, ready, NVIDIA L4, $0.390/h, image ghcr.io/x/radar-worker:0.1, up 12 min",
         "serverless: not configured",
         "problem: RunPod did not answer",
         "spend: $1.23 of $10.00 in 2026-10",
-        "storage: Tigris bucket radar-desk-data, s3; modal yes, worker yes, serverless no",
+        "storage: Tigris bucket radar-desk-data, s3; modal yes, worker yes, runpod yes, serverless no",
         "worker: runpod-abc123, online, job job_1",
     ]
     assert all(m == "GET" for m, _, _ in app.calls)
@@ -161,7 +170,7 @@ def test_the_app_down_exits_1(world, capsys):
         raise httpx.ConnectError("refused", request=request)
 
     deps.app_client = httpx.Client(transport=httpx.MockTransport(down))
-    for argv in (["status"], ["runpod"], ["modal"], ["serverless"], ["stop"]):
+    for argv in (["status"], ["workers"], ["runpod"], ["modal"], ["serverless"], ["stop"]):
         code, _, err = run(capsys, *argv, "--app", "http://127.0.0.1:9")
         assert code == 1
         assert "does not answer at http://127.0.0.1:9" in err

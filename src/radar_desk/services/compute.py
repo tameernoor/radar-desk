@@ -1,12 +1,13 @@
 """The compute choice and the RunPod pod the app starts for pull workers (plan.md, Compute switch B).
 
-The mode, `modal`, `worker` or `serverless`, lives in the database and is seeded once from GPU_BACKEND; the
-fake backend is fixed at start-up. Serverless needs no pod: the poller spawns and polls it like Modal, and
-`status` shows its endpoint, its last /health and the submitted job's RunPod status. In mode worker with RunPod configured, `tick` starts one pod when work is queued and
-moves its row through `tunnel`, `starting` and `ready`, and stops it at the hour cap, when the mode is no
-longer worker, or when something under it fails. An idle pod deletes itself (RADAR_POD_IDLE_DELETE_S, passed
-to the pod), and the next reconcile closes its row as vanished. A pod the app stops is deleted on RunPod before
-its row is closed.
+The mode, `modal`, `worker`, `runpod` or `serverless`, lives in the database and is seeded once from
+GPU_BACKEND; the fake backend is fixed at start-up. In mode worker the app only queues jobs for pull workers
+and never starts a pod. Serverless needs no pod: the poller spawns and polls it like Modal, and `status`
+shows its endpoint, its last /health and the submitted job's RunPod status. In mode runpod with RunPod
+configured, `tick` starts one pod when work is queued and moves its row through `tunnel`, `starting` and
+`ready`, and stops it at the hour cap, when the mode is no longer runpod, or when something under it fails.
+An idle pod deletes itself (RADAR_POD_IDLE_DELETE_S, passed to the pod), and the next reconcile closes its
+row as vanished. A pod the app stops is deleted on RunPod before its row is closed.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ from radar_desk.storage import describe_storage, storage_backend
 
 log = logging.getLogger(__name__)
 
-MODES = ("modal", "worker", "serverless")
+MODES = ("modal", "worker", "runpod", "serverless")
 POD_NAME = "radar-worker"
 MODAL_NEEDS_STORAGE = ("GPU_BACKEND=modal needs S3_BUCKET or STORAGE_BACKEND=modal_volume: "
                        "Modal cannot reach the local storage URLs")
@@ -37,6 +38,7 @@ MODAL_ON_RUNPOD_VOLUME = ("GPU_BACKEND=modal cannot use STORAGE_BACKEND=runpod_v
                           "RunPod volume, it has no presigned URLs")
 SERVERLESS_NEEDS_CONFIG = "serverless needs RUNPOD_API_KEY and RUNPOD_ENDPOINT_ID"
 SERVERLESS_NEEDS_STORAGE = "serverless needs STORAGE_BACKEND=runpod_volume or S3_BUCKET"
+RUNPOD_NEEDS_CONFIG = "runpod needs RUNPOD_API_KEY, RUNPOD_VOLUME_ID, RUNPOD_REGISTRY_AUTH_ID and WORKER_IMAGE"
 FIXED = "The fake backend is chosen at start-up."
 START_HOLDS = ("no_gpu", "tunnel_unreachable", "pod_failed", "budget", "owner")
 RECONCILE_EVERY_S = 30
@@ -52,6 +54,9 @@ UNCONFIGURED = "RunPod is not fully configured, the pod is managed but no new on
 MODAL_ON_LOCAL = "Compute mode was modal but Modal cannot reach local storage; set to worker"
 MODAL_ON_VOLUME = "Compute mode was modal but Modal cannot reach the RunPod volume; set to worker"
 SERVERLESS_FALLBACK = "Compute mode was serverless but it is not configured for this storage; set to worker"
+RUNPOD_FALLBACK = "Compute mode was runpod but RunPod is not configured; set to worker"
+MIGRATED = ("Compute mode worker now means own GPU workers; RunPod is configured, so the stored mode "
+            "became runpod")
 QUEUE_WARNING = ("No worker has started in {n} min; {datacenter} stock or a slow image pull. "
                  "Cancel the job to switch.")
 HEALTH_DOWN = "RunPod /health has not answered for a minute"
@@ -71,6 +76,8 @@ def mode_refusal(settings: Any, mode: str) -> str | None:
         return SERVERLESS_NEEDS_CONFIG
     if mode == "serverless" and storage in ("local", "modal_volume"):
         return SERVERLESS_NEEDS_STORAGE
+    if mode == "runpod" and not settings.runpod_configured:
+        return RUNPOD_NEEDS_CONFIG
     return None
 
 
@@ -87,6 +94,9 @@ UNAVAILABLE = (
     ("serverless", lambda s, b: not s.runpod_api_key, "no RunPod key", "RunPod keys missing; set RUNPOD_API_KEY"),
     ("serverless", lambda s, b: not s.runpod_endpoint_id, "no endpoint",
      "No endpoint configured; run scripts/runpod_endpoint.py create and set RUNPOD_ENDPOINT_ID"),
+    ("runpod", lambda s, b: not s.runpod_api_key, "no RunPod key", "RunPod keys missing; set RUNPOD_API_KEY"),
+    ("runpod", lambda s, b: not s.runpod_configured, "not configured",
+     "A pod needs RUNPOD_VOLUME_ID, RUNPOD_REGISTRY_AUTH_ID and WORKER_IMAGE"),
 )
 
 
@@ -137,6 +147,7 @@ class ComputeService:
         """The fixed backend's name, else the stored mode, seeded from GPU_BACKEND on first read.
 
         Takes no lock: /health reads it while a tick holding the lock probes /health through the tunnel.
+        A seeded mode is already in the new meaning, so the seed also writes the migrate_mode marker.
         """
         if self.fixed:
             return next(iter(self.backends))
@@ -144,6 +155,7 @@ class ComputeService:
         if mode in MODES:
             return mode
         seed = self.settings.gpu_backend if self.settings.gpu_backend in MODES else "modal"
+        self.db.seed_setting("mode_schema", "2")
         return self.db.seed_setting("mode", seed)
 
     def _backend(self, name: str) -> Any:
@@ -167,7 +179,7 @@ class ComputeService:
             if not self.changeable:
                 raise ServiceError(409, FIXED)
             if mode not in MODES:
-                raise ServiceError(409, f"unknown mode {mode!r}; use modal, worker or serverless")
+                raise ServiceError(409, f"unknown mode {mode!r}; use modal, worker, runpod or serverless")
             refusal = mode_refusal(self.settings, mode)
             if refusal:
                 raise ServiceError(409, refusal)
@@ -188,6 +200,19 @@ class ComputeService:
     def _event(self, text: str, now: float) -> None:
         self._set("last_event", f"{iso_at(now)} {text}")
 
+    def migrate_mode(self) -> None:
+        """Once, at start-up: worker used to mean the pod the app starts, so a stored worker becomes runpod
+        when RunPod is configured. The marker mode_schema=2 keeps it from running again; nothing is seeded."""
+        if self.fixed:
+            return
+        with self._lock:
+            if self.db.get_setting("mode_schema") is not None:
+                return
+            if self.db.get_setting("mode") == "worker" and self.settings.runpod_configured:
+                self.db.set_setting("mode", "runpod")
+                self._event(MIGRATED, self.clock())
+            self.db.set_setting("mode_schema", "2")
+
     def fall_back(self, reason: str) -> None:
         """At start-up: a stored mode these settings no longer allow becomes worker, so the app still starts."""
         log.warning("compute: %s", reason)
@@ -202,11 +227,16 @@ class ComputeService:
     def _last_finished(self) -> float:
         return _ts(self.db.last_finished_at()) or 0.0
 
-    def _waiting(self, mode: str) -> bool:
-        """A worker job is submitted, or, in mode worker, a queued job waits without a hold."""
-        if any(job_backend(j) == "worker" for j in self.db.list_jobs(state="submitted", limit=ALL)):
+    def _pod_job(self, pod: PodRecord) -> Job | None:
+        """The submitted job whose lease names the pod's worker, or None."""
+        return next((j for j in self.db.list_jobs(state="submitted", limit=ALL)
+                     if j.lease is not None and j.lease.worker_id == pod.worker_id), None)
+
+    def _waiting(self, pod: PodRecord, mode: str) -> bool:
+        """The pod's job is submitted, or, in mode runpod, a queued job waits without a hold."""
+        if self._pod_job(pod) is not None:
             return True
-        return mode == "worker" and any(
+        return mode == "runpod" and any(
             j.hold_reason is None for j in self.db.list_jobs(state="queued", limit=ALL))
 
     def _tunnel_alive(self, pod: PodRecord) -> bool:
@@ -224,8 +254,7 @@ class ComputeService:
             tunnel_alive = None
             if self.settings.tunnel_mode == "managed":
                 tunnel_alive = bool(pod.tunnel) and self._tunnel_alive(pod)
-            job = next((j for j in self.db.list_jobs(state="submitted", limit=ALL)
-                        if job_backend(j) == "worker"), None)
+            job = self._pod_job(pod)
             return {
                 "id": pod.id, "runpod_id": pod.runpod_id, "phase": pod.phase, "gpu": pod.gpu,
                 "image": pod.image,
@@ -332,8 +361,8 @@ class ComputeService:
     def start_now(self, now: float | None = None) -> dict:
         now = self.clock() if now is None else now
         with self._lock:
-            if self.mode != "worker":
-                raise ServiceError(409, "a pod starts only in the worker mode")
+            if self.mode != "runpod":
+                raise ServiceError(409, "a pod starts only in mode runpod")
             if not self.configured():
                 raise ServiceError(409, "RunPod is not configured: set RUNPOD_API_KEY, RUNPOD_VOLUME_ID, "
                                         "RUNPOD_REGISTRY_AUTH_ID and WORKER_IMAGE")
@@ -433,7 +462,7 @@ class ComputeService:
         """One pass of the pod rules, in order: reconcile, tunnel health, tunnel, starting, stop, start.
 
         Reconciling runs in every mode, so a lost pod is deleted even after a switch to modal; only new
-        starts need RunPod fully configured. In mode worker the app never stops a pod for idling; the pod
+        starts need RunPod fully configured. In mode runpod the app never stops a pod for idling; the pod
         deletes itself and the reconcile then closes its row as vanished.
         """
         now = self.clock() if now is None else now
@@ -464,7 +493,7 @@ class ComputeService:
                 self._delete_strays(listed, pod.runpod_id if pod else None, now)
 
             configured = self.configured()
-            if pod is None and (mode != "worker" or not configured):
+            if pod is None and (mode != "runpod" or not configured):
                 return
             if pod is not None and not configured:
                 self._set("problem", UNCONFIGURED)
@@ -477,8 +506,8 @@ class ComputeService:
 
             # 3. Waiting for the tunnel, then the deploy.
             if pod is not None and pod.phase == "tunnel":
-                if mode != "worker" or not self._wanted(no_gpu_waits=True):
-                    if not self._stop(pod, "mode" if mode != "worker" else "idle", now):
+                if mode != "runpod" or not self._wanted(no_gpu_waits=True):
+                    if not self._stop(pod, "mode" if mode != "runpod" else "idle", now):
                         return
                     pod = None
                 elif configured and now >= self._get_float("next_start_at"):
@@ -502,7 +531,7 @@ class ComputeService:
                     pod = None
 
             # A ready pod whose worker went silent is of no use, even with work queued.
-            if pod is not None and pod.phase == "ready" and not self._worker_job_submitted():
+            if pod is not None and pod.phase == "ready" and self._pod_job(pod) is None:
                 worker = self.db.get_worker(pod.worker_id)
                 seen = parse_iso(worker.last_seen_at) if worker else parse_iso(pod.ready_at)
                 if now - seen > self.settings.worker_lease_s:
@@ -510,24 +539,21 @@ class ComputeService:
                         return
                     pod = None
 
-            # 5. The hour cap, then, when the mode is no longer worker and nothing waits, at once.
+            # 5. The hour cap, then, when the mode is no longer runpod and the pod's job is done, at once.
             if pod is not None and pod.phase in ("starting", "ready"):
                 if now - parse_iso(pod.started_at) >= self.settings.runpod_max_pod_hours * 3600:
                     if not self._stop(pod, "cap", now):
                         return
                     pod = None
-                elif mode != "worker" and not self._waiting(mode):
+                elif mode != "runpod" and not self._waiting(pod, mode):
                     if not self._stop(pod, "mode", now):
                         return
                     pod = None
 
             # 6. Start a pod when work waits or the owner asked.
-            if (pod is None and mode == "worker" and configured and now >= self._get_float("next_start_at")
+            if (pod is None and mode == "runpod" and configured and now >= self._get_float("next_start_at")
                     and self._wanted()):
                 self._start(now)
-
-    def _worker_job_submitted(self) -> bool:
-        return any(job_backend(j) == "worker" for j in self.db.list_jobs(state="submitted", limit=ALL))
 
     def _wanted(self, no_gpu_waits: bool = False) -> bool:
         """The owner asked for a pod, or a queued job waits without a hold (or, while a pod waits for
@@ -564,12 +590,12 @@ class ComputeService:
         self._event(f"starting a pod, waiting for {pod.tunnel_url}", now)
 
     def _tunnel_phase(self, pod: PodRecord, now: float) -> PodRecord | None:
-        """Deploy once the tunnel answers as the worker backend; give up after TUNNEL_TIMEOUT_S."""
+        """Deploy once the tunnel answers in mode runpod; give up after TUNNEL_TIMEOUT_S."""
         try:
             body = self.probe(pod.tunnel_url)
         except Exception:  # noqa: BLE001 - an unreachable URL, the same as no answer
             body = None
-        if not (isinstance(body, dict) and body.get("backend") == "worker"):
+        if not (isinstance(body, dict) and body.get("backend") == "runpod"):
             if now - parse_iso(pod.created_at) < TUNNEL_TIMEOUT_S:
                 return pod
             if self._stop(pod, "tunnel_timeout", now, problem=UNREACHABLE):

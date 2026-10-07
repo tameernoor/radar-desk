@@ -20,19 +20,19 @@ test("compute: the fake backend cannot be switched", async ({ page }) => {
   const section = page.getByRole("region", { name: "Compute" });
   await expect(section.getByText("The fake backend is chosen at start-up.")).toBeVisible();
   const radios = section.getByRole("radio");
-  await expect(radios).toHaveCount(3);
-  await expect(radios.nth(0)).toBeDisabled();
-  await expect(radios.nth(1)).toBeDisabled();
-  await expect(radios.nth(2)).toBeDisabled();
+  await expect(radios).toHaveCount(4);
+  for (let i = 0; i < 4; i++) await expect(radios.nth(i)).toBeDisabled();
   // The fake backend runs on local storage with no RunPod keys.
   await expect(section.locator("#compute-storage")).toHaveText("Storage: Local folder (used by all modes)");
   const labels = section.locator("label");
   await expect(labels.nth(0)).toHaveText("Modal (not on local storage)");
   await expect(labels.nth(0)).toHaveAttribute("title", "Modal cannot reach a local folder; this app stores scans under DATA_DIR");
-  await expect(labels.nth(1)).toHaveText("Worker");
+  await expect(labels.nth(1)).toHaveText("Own GPU workers");
   await expect(labels.nth(1)).not.toHaveAttribute("title");
-  await expect(labels.nth(2)).toHaveText("RunPod serverless (needs a shared bucket)");
-  await expect(labels.nth(2)).toHaveAttribute(
+  await expect(labels.nth(2)).toHaveText("RunPod pod (no RunPod key)");
+  await expect(labels.nth(2)).toHaveAttribute("title", "RunPod keys missing; set RUNPOD_API_KEY");
+  await expect(labels.nth(3)).toHaveText("RunPod serverless (needs a shared bucket)");
+  await expect(labels.nth(3)).toHaveAttribute(
     "title",
     "Serverless needs a shared bucket or the RunPod volume; this app stores scans in a local folder",
   );
