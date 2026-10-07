@@ -18,19 +18,37 @@ Scores are similarity to a finding's text, not calibrated probabilities. The 50%
 
 ## Run
 
-Needs `uv`, Node and a Modal account. Put the weights on a Modal Volume `radar-weights` (see `worker/weights.json`).
+Needs `uv` and Node. Cloud accounts only for the mode you pick (see Compute); everything on one machine: see Local.
 
 ```sh
 uv sync
 cd web && npm install && npm run build && cd ..
 cp .env.example .env        # fill in the settings it lists
-set -a && source .env && set +a && uv run modal deploy worker/modal_app.py
+set -a && source .env && set +a && uv run modal deploy worker/modal_app.py   # Modal mode only
 uv run python -m radar_desk  # http://127.0.0.1:8000, log in with OWNER_TOKEN
 ```
 
 `OWNER_TOKEN` and `SESSION_SECRET`: long random strings, e.g. `openssl rand -hex 32`. `OWNER_TOKEN` is the login (and `Authorization: Bearer` for the API); changing either logs everyone out. Workers never get it: each gets its own revocable token on the jobs page.
 
 `GPU_BACKEND=fake` runs without a GPU (results marked fake).
+
+## Local
+
+App, storage, GPU and chat on your own machines, no cloud. In `.env`:
+
+```sh
+STORAGE_BACKEND=local     # files under DATA_DIR
+GPU_BACKEND=worker        # own GPU workers
+LLM_PROVIDER=ollama       # optional local chat: ollama pull qwen3:8b
+CHAT_MODEL=qwen3:8b
+```
+
+1. Build the worker image: `docker buildx build --platform linux/amd64 -f worker/docker/Dockerfile -t radar-worker .`
+2. Start the app: `uv run python -m radar_desk`, open http://127.0.0.1:8000.
+3. Jobs page: create a worker token, copy the run line, run it on an NVIDIA machine (24 GB) that reaches the app. First start downloads the weights (about 2 GB) into the `radar-weights` Docker volume.
+4. Same machine as the app: the line has `--network host` (Linux). Docker Desktop (Mac, Windows): drop it and use `RADAR_DESK_URL=http://host.docker.internal:8000`.
+
+No NVIDIA card: `GPU_BACKEND=fake` shows the app with fake scores; `scripts/score_local.py` scores one scan on an Apple GPU or CPU (see Compute).
 
 ## Storage
 
