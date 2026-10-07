@@ -21,7 +21,8 @@
       <h2 id="compute-title">Compute</h2>
       <div class="row" role="radiogroup" aria-labelledby="compute-title">
         <label><input type="radio" name="compute-mode" value="modal"> <span data-label>Modal</span></label>
-        <label><input type="radio" name="compute-mode" value="worker"> <span data-label>RunPod pod</span></label>
+        <label><input type="radio" name="compute-mode" value="worker"> <span data-label>Own GPU workers</span></label>
+        <label><input type="radio" name="compute-mode" value="runpod"> <span data-label>RunPod pod</span></label>
         <label><input type="radio" name="compute-mode" value="serverless"> <span data-label>RunPod serverless</span></label>
         <button type="button" id="pod-start" hidden>Start now</button>
         <button type="button" id="pod-stop" class="danger" hidden>Stop now</button>
@@ -51,6 +52,7 @@
     <section aria-labelledby="workers-title">
       <h2 id="workers-title">Workers</h2>
       <p class="status-line error" id="workers-status" role="status" aria-live="polite"></p>
+      <p class="muted" id="workers-intro" hidden>Create a token, then run the line below on a machine with an NVIDIA GPU. The worker pulls jobs from this app.</p>
       <h3>Tokens</h3>
       <form class="row" id="token-form">
         <input type="text" id="token-name" aria-label="Token name" placeholder="Token name" maxlength="100" required>
@@ -80,7 +82,7 @@
         <pre class="log"><code id="run-line"></code></pre>
         <button type="button" id="run-copy">Copy</button>
       </div>
-      <p class="muted small">The app must be reachable from the pod, so RADAR_DESK_URL is a public or tunnel URL. The weights are filled on /workspace on first start.</p>
+      <p class="muted small">The app must be reachable from the worker, so RADAR_DESK_URL is a URL the worker can open (this origin on the same network, or WORKER_PUBLIC_URL / a tunnel). The weights are filled on /workspace on first start.</p>
     </section>
   </main>
   <footer class="footer">

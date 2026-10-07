@@ -190,6 +190,16 @@ def test_serverless_gpu_needs_config_and_reachable_storage(make_services):
 # Compute switch
 
 
+def test_gpu_backend_runpod_loads(monkeypatch):
+    monkeypatch.setenv("OWNER_TOKEN", "o")
+    monkeypatch.setenv("SESSION_SECRET", "s")
+    monkeypatch.setenv("GPU_BACKEND", "runpod")
+    assert load_settings(_env_file=None).gpu_backend == "runpod"
+    monkeypatch.setenv("GPU_BACKEND", "pods")
+    with pytest.raises(ConfigError, match="GPU_BACKEND"):
+        load_settings(_env_file=None)
+
+
 def test_tunnel_mode_is_inferred_from_the_public_url():
     assert _settings().tunnel_mode == "managed"
     assert _settings(worker_public_url="https://desk.example").tunnel_mode == "external"

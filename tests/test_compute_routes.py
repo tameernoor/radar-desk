@@ -13,6 +13,8 @@ from radar_desk.services.compute import (
     MODAL_ON_LOCAL,
     MODAL_ON_RUNPOD_VOLUME,
     MODAL_ON_VOLUME,
+    RUNPOD_FALLBACK,
+    RUNPOD_NEEDS_CONFIG,
     SERVERLESS_FALLBACK,
     SERVERLESS_NEEDS_CONFIG,
     SERVERLESS_NEEDS_STORAGE,
@@ -42,7 +44,8 @@ def test_compute_routes(world):
     owner, _ = clients(world.svc)
     body = owner.get("/compute").json()
     assert set(body) == FIELDS
-    assert body["mode"] == "worker" and body["changeable"] is True and body["tunnel_mode"] == "managed"
+    assert body["mode"] == "runpod" and body["changeable"] is True and body["tunnel_mode"] == "managed"
+    assert list(body["storage"]["modes"]) == ["modal", "worker", "runpod", "serverless"]
     assert body["runpod"] == {"configured": True, "datacenter": "EU-RO-1", "max_pod_hours": 3,
                               "gpus": ["NVIDIA L4", "NVIDIA GeForce RTX 4090"], "idle_delete_s": 600,
                               "app_lost_delete_s": 600}
@@ -55,6 +58,10 @@ def test_compute_routes(world):
     assert owner.get("/health").json()["backend"] == "modal"
     assert owner.post("/compute/pod/start").status_code == 409
     assert owner.put("/compute", json={"mode": "worker"}).json()["mode"] == "worker"
+    assert owner.get("/health").json()["backend"] == "worker"
+    assert owner.post("/compute/pod/start").status_code == 409
+    assert owner.put("/compute", json={"mode": "runpod"}).json()["mode"] == "runpod"
+    assert owner.get("/health").json()["backend"] == "runpod"
     r = owner.put("/compute", json={"mode": "cloud"})
     assert r.status_code == 409 and "cloud" in r.json()["detail"]
 
@@ -93,6 +100,8 @@ def test_serverless_through_the_routes(tmp_path):
      SERVERLESS_NEEDS_STORAGE),
     ({"runpod_endpoint_id": ENDPOINT, "storage_backend": "modal_volume"}, "serverless", SERVERLESS_NEEDS_STORAGE),
     ({"storage_backend": "runpod_volume"}, "modal", MODAL_ON_RUNPOD_VOLUME),
+    ({"gpu_backend": "worker", "runpod_api_key": None}, "runpod", RUNPOD_NEEDS_CONFIG),
+    ({"gpu_backend": "worker", "worker_image": None}, "runpod", RUNPOD_NEEDS_CONFIG),
 ])
 def test_put_refusals(tmp_path, overrides, mode, detail):
     w = World(tmp_path, **overrides)
@@ -106,6 +115,7 @@ def test_put_refusals(tmp_path, overrides, mode, detail):
     ({"gpu_backend": "serverless", "s3_bucket": "b"}, f"GPU_BACKEND=serverless: {SERVERLESS_NEEDS_CONFIG}"),
     ({"gpu_backend": "serverless", "runpod_api_key": "k", "runpod_endpoint_id": ENDPOINT},
      f"GPU_BACKEND=serverless: {SERVERLESS_NEEDS_STORAGE}"),
+    ({"gpu_backend": "runpod", "runpod_api_key": "k"}, f"GPU_BACKEND=runpod: {RUNPOD_NEEDS_CONFIG}"),
 ])
 def test_create_app_refuses_at_start(tmp_path, overrides, message):
     settings = Settings(_env_file=None, owner_token=OWNER, session_secret="s", data_dir=tmp_path, **overrides)
@@ -118,6 +128,7 @@ def test_create_app_refuses_at_start(tmp_path, overrides, message):
     ({"storage_backend": None, "s3_bucket": None}, "serverless", SERVERLESS_FALLBACK),
     ({}, "serverless", SERVERLESS_FALLBACK),
     ({"storage_backend": "runpod_volume"}, "modal", MODAL_ON_VOLUME),
+    ({"gpu_backend": "worker", "runpod_api_key": None}, "runpod", RUNPOD_FALLBACK),
 ])
 def test_a_stored_mode_no_longer_allowed_falls_back_to_worker(tmp_path, overrides, mode, reason):
     w = World(tmp_path, **overrides)
@@ -132,6 +143,15 @@ def test_a_stored_serverless_mode_that_is_allowed_stays(tmp_path):
     w.svc.db.set_setting("mode", "serverless")
     create_app(w.svc.settings, w.svc, start_poller=False)
     assert w.compute.mode == "serverless"
+
+
+def test_create_app_migrates_a_stored_worker_mode(tmp_path):
+    w = World(tmp_path)
+    w.svc.db.set_setting("mode", "worker")  # a database from before mode runpod, no marker
+    w.svc.db.set_setting("mode_schema", None)
+    owner, _ = clients(w.svc)
+    assert owner.get("/compute").json()["mode"] == "runpod"
+    assert w.svc.db.get_setting("mode_schema") == "2"
 
 
 def test_the_fake_backend_is_fixed(make_services):
@@ -152,7 +172,7 @@ def test_compute_routes_need_the_owner(world):
     assert anon.put("/compute", json={"mode": "modal"}).status_code == 401
     assert anon.post("/compute/pod/start").status_code == 401
     assert anon.post("/compute/pod/stop").status_code == 401
-    assert world.compute.mode == "worker"
+    assert world.compute.mode == "runpod"
 
 
 def test_a_stored_modal_mode_on_local_storage_falls_back_to_worker(tmp_path):
@@ -178,6 +198,7 @@ LOCAL_SERVERLESS = ("needs a shared bucket", NEEDS_BUCKET + "in a local folder")
 MODAL_SERVERLESS = ("needs a shared bucket", NEEDS_BUCKET + "on the Modal volume")
 NO_KEY = ("no RunPod key", "RunPod keys missing; set RUNPOD_API_KEY")
 NO_ENDPOINT = ("no endpoint", "No endpoint configured; run scripts/runpod_endpoint.py create and set RUNPOD_ENDPOINT_ID")
+NO_POD = ("not configured", "A pod needs RUNPOD_VOLUME_ID, RUNPOD_REGISTRY_AUTH_ID and WORKER_IMAGE")
 
 # kind -> (overrides, backend, name, modal row or None, serverless row from the storage or None)
 STORAGES = {
@@ -191,19 +212,21 @@ STORAGES = {
                        "runpod_s3_secret_access_key": "b"}, "runpod_volume", "RunPod volume vol-1 (EU-RO-1)",
                       VOLUME_MODAL, None),
 }
-SERVERLESS_CONFIGS = {
-    "no key": ({"runpod_api_key": None}, NO_KEY),
-    "key only": ({}, NO_ENDPOINT),
-    "key and endpoint": ({"runpod_endpoint_id": ENDPOINT}, None),
+# config -> (overrides, serverless row, runpod row)
+RUNPOD_CONFIGS = {
+    "no key": ({"runpod_api_key": None}, NO_KEY, NO_KEY),
+    "key only": ({}, NO_ENDPOINT, None),
+    "key and endpoint": ({"runpod_endpoint_id": ENDPOINT}, None, None),
+    "no image": ({"worker_image": None}, NO_ENDPOINT, NO_POD),
 }
 
 
-@pytest.mark.parametrize("config", SERVERLESS_CONFIGS)
+@pytest.mark.parametrize("config", RUNPOD_CONFIGS)
 @pytest.mark.parametrize("kind", STORAGES)
 def test_the_storage_block(tmp_path, kind, config):
     overrides, backend, name, modal_row, storage_row = STORAGES[kind]
-    config_overrides, config_row = SERVERLESS_CONFIGS[config]
-    w = World(tmp_path, **overrides, **config_overrides)
+    config_overrides, config_row, runpod_row = RUNPOD_CONFIGS[config]
+    w = World(tmp_path, gpu_backend="worker", **overrides, **config_overrides)
     owner, _ = clients(w.svc)
     storage = owner.get("/compute").json()["storage"]
     assert storage["backend"] == backend and storage["name"] == name
@@ -213,8 +236,8 @@ def test_the_storage_block(tmp_path, kind, config):
                 else {"available": True, "note": None, "reason": None})
 
     assert storage["modes"] == {"modal": expect(modal_row), "worker": expect(None),
-                                "serverless": expect(storage_row or config_row)}
-    for mode in ("modal", "serverless"):
+                                "runpod": expect(runpod_row), "serverless": expect(storage_row or config_row)}
+    for mode in ("modal", "runpod", "serverless"):
         assert storage["modes"][mode]["available"] == (mode_refusal(w.settings, mode) is None)
 
 

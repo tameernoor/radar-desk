@@ -4,7 +4,7 @@ import { computePhrase, fromGpuStatus, modeControl, workerUrl } from "../src/com
 
 const NOW = Date.parse("2026-10-02T12:00:00Z");
 const at = (secondsAgo) => new Date(NOW - secondsAgo * 1000).toISOString();
-const base = { mode: "worker", changeable: true, runpod: { configured: true }, pod: null, in_flight: null, queued: 0, held: [], problem: null };
+const base = { mode: "runpod", changeable: true, runpod: { configured: true }, pod: null, in_flight: null, queued: 0, held: [], problem: null };
 const pod = (extra) => ({ id: "pod_1", runpod_id: "rp123", gpu: "NVIDIA L4", cost_per_hr: 0.39, created_at: at(200), started_at: at(150), job_id: null, idle_s: null, idle_delete_s: 600, ...extra });
 const phrase = (s) => computePhrase({ ...base, ...s }, NOW);
 
@@ -12,12 +12,20 @@ test("modal names the requested GPUs", () => {
   expect(phrase({ mode: "modal", gpus: ["L4", "L40S"] })).toEqual({ text: "Modal, L4 or L40S, scales to zero", tone: "idle" });
 });
 
-test("worker without RunPod keys", () => {
-  expect(phrase({ runpod: { configured: false } })).toEqual({ text: "Worker backend, no RunPod keys, workers are started by hand", tone: "idle" });
+test("own workers: none online, some online, count unknown", () => {
+  const worker = { mode: "worker", runpod: { configured: false } };
+  expect(phrase({ ...worker, workers_online: 0 })).toEqual({ text: "Waiting for your workers; start one with the docker run line below", tone: "idle" });
+  expect(phrase({ ...worker, workers_online: 2 })).toEqual({ text: "Own GPU workers, 2 online", tone: "idle" });
+  expect(phrase(worker)).toEqual({ text: "Own GPU workers", tone: "idle" });
 });
 
-test("RunPod without a pod", () => {
-  expect(phrase({})).toEqual({ text: "RunPod, no pod, starts when a job is queued", tone: "idle" });
+test("own workers scoring get the generic suffix", () => {
+  const s = { mode: "worker", workers_online: 1, in_flight: { job_id: "job_77777777x", backend: "worker" }, scan: "b.nii" };
+  expect(phrase(s)).toEqual({ text: "Own GPU workers, 1 online, scoring b.nii", tone: "busy" });
+});
+
+test("RunPod pod mode without a pod", () => {
+  expect(phrase({})).toEqual({ text: "RunPod pod, none running, starts when a job is queued", tone: "idle" });
 });
 
 test("pod waiting for the tunnel", () => {
@@ -47,22 +55,22 @@ test("pod ready and idle says how long and when it deletes itself", () => {
 });
 
 test("a job running elsewhere is named", () => {
-  const s = { mode: "worker", in_flight: { job_id: "job_99999999x", backend: "modal" }, scan: "a.nii" };
-  expect(phrase(s)).toEqual({ text: "RunPod, no pod, starts when a job is queued, scoring a.nii", tone: "busy" });
+  const s = { mode: "runpod", in_flight: { job_id: "job_99999999x", backend: "modal" }, scan: "a.nii" };
+  expect(phrase(s)).toEqual({ text: "RunPod pod, none running, starts when a job is queued, scoring a.nii", tone: "busy" });
 });
 
 test("a problem is its own sentence and wins the tone", () => {
   const held = [{ job_id: "j1", hold_reason: "no_gpu" }];
   expect(phrase({ held, problem: "No L4 or RTX 4090 in EU-RO-1, retrying in 60 s" })).toEqual({
-    text: "RunPod, no pod, starts when a job is queued. No L4 or RTX 4090 in EU-RO-1, retrying in 60 s.",
+    text: "RunPod pod, none running, starts when a job is queued. No L4 or RTX 4090 in EU-RO-1, retrying in 60 s.",
     tone: "problem",
   });
-  expect(phrase({ problem: "Budget reached." }).text).toBe("RunPod, no pod, starts when a job is queued. Budget reached.");
+  expect(phrase({ problem: "Budget reached." }).text).toBe("RunPod pod, none running, starts when a job is queued. Budget reached.");
 });
 
 test("held jobs without a problem are counted", () => {
   const held = [{ job_id: "j1", hold_reason: "budget" }, { job_id: "j2", hold_reason: "budget" }];
-  expect(phrase({ held })).toEqual({ text: "RunPod, no pod, starts when a job is queued. 2 job(s) held (budget).", tone: "held" });
+  expect(phrase({ held })).toEqual({ text: "RunPod pod, none running, starts when a job is queued. 2 job(s) held (budget).", tone: "held" });
 });
 
 test("fake backend", () => {
@@ -72,7 +80,7 @@ test("fake backend", () => {
 test("the scans strip's gpu_status maps onto the same phrase", () => {
   const g = {
     backend: "worker",
-    compute_mode: "worker",
+    compute_mode: "runpod",
     runpod_configured: true,
     gpu_requested: ["L4"],
     pod: pod({ phase: "ready", job_id: "job_1" }),
@@ -81,10 +89,12 @@ test("the scans strip's gpu_status maps onto the same phrase", () => {
     held: [],
   };
   const s = fromGpuStatus(g, (id) => `name of ${id}`);
-  expect(s).toMatchObject({ mode: "worker", in_flight: { job_id: "job_1", backend: "worker" }, queued: 1, held: [], scan: "name of scan_1" });
+  expect(s).toMatchObject({ mode: "runpod", in_flight: { job_id: "job_1", backend: "worker" }, queued: 1, held: [], scan: "name of scan_1" });
   expect(computePhrase(s, NOW)).toEqual({ text: "Pod rp123, NVIDIA L4, $0.39/h, up 2:30, scoring name of scan_1", tone: "busy" });
-  const idle = fromGpuStatus({ backend: "worker", compute_mode: "worker", runpod_configured: false, gpu_requested: [], pod: null, in_flight: null, queued: [], held: [] });
-  expect(computePhrase(idle, NOW).text).toBe("Worker backend, no RunPod keys, workers are started by hand");
+  const idle = { backend: "worker", compute_mode: "runpod", runpod_configured: true, gpu_requested: [], pod: null, in_flight: null, queued: [], held: [] };
+  expect(computePhrase(fromGpuStatus(idle), NOW).text).toBe("RunPod pod, none running, starts when a job is queued");
+  // The strip has no worker count.
+  expect(computePhrase(fromGpuStatus({ ...idle, compute_mode: "worker", runpod_configured: false }), NOW).text).toBe("Own GPU workers");
   const sg = (status) => ({
     backend: "serverless",
     compute_mode: "serverless",
@@ -155,9 +165,9 @@ test("serverless not configured, or the block missing", () => {
   expect(phrase({ mode: "serverless" })).toEqual({ text, tone: "idle" });
 });
 
-test("a serverless job in flight while the mode is worker gets the generic suffix", () => {
-  const s = { ...sl(sjob("IN_PROGRESS")), mode: "worker", scan: "a.nii" };
-  expect(phrase(s)).toEqual({ text: "RunPod, no pod, starts when a job is queued, scoring a.nii", tone: "busy" });
+test("a serverless job in flight while the mode is runpod gets the generic suffix", () => {
+  const s = { ...sl(sjob("IN_PROGRESS")), mode: "runpod", scan: "a.nii" };
+  expect(phrase(s)).toEqual({ text: "RunPod pod, none running, starts when a job is queued, scoring a.nii", tone: "busy" });
 });
 
 test("a problem sentence still wins the tone in serverless", () => {
@@ -166,17 +176,22 @@ test("a problem sentence still wins the tone in serverless", () => {
 });
 
 test("worker URL: managed tunnel of the pod, fixed URL, nothing on modal", () => {
+  // base is mode runpod; mode worker shows the same rows (a pod may drain there after a switch).
   const managed = { ...base, tunnel_mode: "managed", pod: pod({ tunnel_url: "https://a-b-c.trycloudflare.com", tunnel_alive: true }) };
   expect(workerUrl(managed)).toEqual({ url: "https://a-b-c.trycloudflare.com", label: "Tunnel", note: "managed" });
   expect(workerUrl({ ...managed, pod: { ...managed.pod, tunnel_alive: false } }).note).toBe("down");
   expect(workerUrl({ ...base, tunnel_mode: "managed", pod: null })).toBeNull();
   expect(workerUrl({ ...base, tunnel_mode: "external", public_url: "https://radar.example.org" })).toEqual({ url: "https://radar.example.org", label: "Worker URL", note: "fixed" });
   expect(workerUrl({ ...managed, mode: "modal" })).toBeNull();
+  const own = { ...base, mode: "worker", runpod: { configured: false } };
+  expect(workerUrl({ ...own, tunnel_mode: "external", public_url: "https://radar.example.org" })).toEqual({ url: "https://radar.example.org", label: "Worker URL", note: "fixed" });
+  expect(workerUrl({ ...own, tunnel_mode: "managed", pod: managed.pod }).label).toBe("Tunnel");
+  expect(workerUrl({ ...own, tunnel_mode: "managed", pod: null })).toBeNull();
 });
 
 const open = { available: true, reason: null, note: null };
 const localReason = "Modal cannot reach a local folder; this app stores scans under DATA_DIR";
-const storage = (modal, serverless) => ({ backend: "local", name: "Local folder", modes: { modal, worker: open, serverless } });
+const storage = (modal, serverless) => ({ backend: "local", name: "Local folder", modes: { modal, worker: open, runpod: open, serverless } });
 
 test("mode control: an available mode has no note and no title", () => {
   const c = { ...base, storage: storage(open, open) };
@@ -187,13 +202,22 @@ test("mode control: an available mode has no note and no title", () => {
 test("mode control: an unavailable mode is disabled, with its note and reason", () => {
   const c = { ...base, storage: storage({ available: false, reason: localReason, note: "not on local storage" }, open) };
   expect(modeControl(c, "modal")).toEqual({ label: "Modal (not on local storage)", disabled: true, title: localReason });
-  expect(modeControl(c, "worker")).toEqual({ label: "RunPod pod", disabled: false, title: null });
+  expect(modeControl(c, "worker")).toEqual({ label: "Own GPU workers", disabled: false, title: null });
+});
+
+test("mode control: an unavailable runpod carries the backend's note and reason", () => {
+  const keys = "RunPod keys missing; set RUNPOD_API_KEY";
+  const c = { ...base, storage: { ...storage(open, open), modes: { ...storage(open, open).modes, runpod: { available: false, reason: keys, note: "no RunPod key" } } } };
+  expect(modeControl(c, "runpod")).toEqual({ label: "RunPod pod (no RunPod key)", disabled: true, title: keys });
+  const image = "A pod needs RUNPOD_VOLUME_ID, RUNPOD_REGISTRY_AUTH_ID and WORKER_IMAGE";
+  c.storage.modes.runpod = { available: false, reason: image, note: "not configured" };
+  expect(modeControl(c, "runpod")).toEqual({ label: "RunPod pod (not configured)", disabled: true, title: image });
 });
 
 test("mode control: not changeable disables every mode but adds no note", () => {
   const c = { ...base, mode: "fake", changeable: false, storage: storage(open, open) };
   expect(modeControl(c, "modal")).toEqual({ label: "Modal", disabled: true, title: null });
-  expect(modeControl(c, "worker")).toEqual({ label: "RunPod pod", disabled: true, title: null });
+  expect(modeControl(c, "worker")).toEqual({ label: "Own GPU workers", disabled: true, title: null });
 });
 
 test("mode control: a missing storage block reads as every mode available", () => {
@@ -201,8 +225,10 @@ test("mode control: a missing storage block reads as every mode available", () =
   expect(modeControl(base, "serverless")).toEqual({ label: "RunPod serverless", disabled: false, title: null });
 });
 
-test("mode control: the worker label follows the RunPod keys", () => {
-  expect(modeControl(base, "worker").label).toBe("RunPod pod");
-  expect(modeControl({ ...base, runpod: { configured: false } }, "worker").label).toBe("Worker");
-  expect(modeControl({ ...base, runpod: undefined }, "worker").label).toBe("Worker");
+test("mode control: the four names do not depend on the RunPod keys", () => {
+  const names = { modal: "Modal", worker: "Own GPU workers", runpod: "RunPod pod", serverless: "RunPod serverless" };
+  for (const runpod of [{ configured: true }, { configured: false }, undefined]) {
+    for (const [value, name] of Object.entries(names)) expect(modeControl({ ...base, runpod }, value).label).toBe(name);
+  }
+  expect(modeControl(base, "other").label).toBe("other");
 });

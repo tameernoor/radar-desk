@@ -4,7 +4,10 @@ import { elapsed, shortId } from "./format.js";
 
 const rate = (x) => (x == null ? "$–/h" : `$${x.toFixed(2)}/h`);
 
-// s is the GET /compute body plus `gpus` (the requested Modal GPUs) and `scan` (the in-flight scan's name).
+const MODE_NAMES = { modal: "Modal", worker: "Own GPU workers", runpod: "RunPod pod", serverless: "RunPod serverless" };
+
+// s is the GET /compute body plus `gpus` (the requested Modal GPUs), `scan` (the in-flight scan's name) and
+// `workers_online` (the jobs page's count of workers heard from within the lease; missing on the scans strip).
 // Its `serverless` block may be missing (an older backend, the scans strip); that reads as not configured.
 export function computePhrase(s, nowMs) {
   const now = new Date(nowMs).toISOString();
@@ -39,10 +42,12 @@ export function computePhrase(s, nowMs) {
     text = `RunPod serverless, ${(s.serverless.gpus || []).join(" or ")}, scales to zero`;
   } else if (s.mode === "serverless") text = "RunPod serverless, not configured (needs RUNPOD_ENDPOINT_ID)";
   else if (s.mode === "modal") text = `Modal, ${(s.gpus || []).join(" or ") || "GPU"}, scales to zero`;
-  else if (s.mode === "worker" && !s.runpod?.configured) text = "Worker backend, no RunPod keys, workers are started by hand";
-  else if (s.mode === "worker") text = "RunPod, no pod, starts when a job is queued";
+  else if (s.mode === "worker" && s.workers_online > 0) text = `Own GPU workers, ${s.workers_online} online`;
+  else if (s.mode === "worker" && s.workers_online === 0) text = "Waiting for your workers; start one with the docker run line below";
+  else if (s.mode === "worker") text = "Own GPU workers";
+  else if (s.mode === "runpod") text = "RunPod pod, none running, starts when a job is queued";
   else text = "Fake backend";
-  // A job still running elsewhere (Modal, or a worker started by hand) is named too.
+  // A job still running elsewhere (Modal, or an own worker) is named too.
   if (s.in_flight && !podScoring && !ownPhrase) text += `, scoring ${s.scan || shortId(s.in_flight.job_id)}`;
   if (s.problem) text += `. ${s.problem}${/[.!?]$/.test(s.problem) ? "" : "."}`;
   else if (held.length) text += `. ${held.length} job(s) held (${[...new Set(held.map((j) => j.hold_reason))].join(", ")}).`;
@@ -53,7 +58,7 @@ export function computePhrase(s, nowMs) {
 // One Compute radio: its label, whether it is disabled, and the tooltip on its <label>. c is the GET /compute
 // body; a missing `storage` block (an older backend) reads as every mode available.
 export function modeControl(c, value) {
-  const name = value === "modal" ? "Modal" : value === "serverless" ? "RunPod serverless" : c.runpod?.configured ? "RunPod pod" : "Worker";
+  const name = MODE_NAMES[value] || value;
   const m = c.storage?.modes?.[value];
   const unavailable = m?.available === false;
   return {
@@ -66,7 +71,7 @@ export function modeControl(c, value) {
 // The address workers use to reach this app: the managed quick tunnel of the open pod, or the fixed
 // WORKER_PUBLIC_URL. Null when there is none to show.
 export function workerUrl(s) {
-  if (s.mode !== "worker") return null;
+  if (s.mode !== "worker" && s.mode !== "runpod") return null;
   if (s.tunnel_mode === "external" && s.public_url) return { url: s.public_url, label: "Worker URL", note: "fixed" };
   if (s.pod?.tunnel_url) return { url: s.pod.tunnel_url, label: "Tunnel", note: s.pod.tunnel_alive === false ? "down" : "managed" };
   return null;

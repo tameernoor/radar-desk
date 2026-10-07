@@ -1,8 +1,9 @@
 """A front end to the app's Compute choice (plan.md, Compute switch, B, and RunPod Serverless).
 
-The app starts and stops the pod and its tunnel itself; this command only calls the owner routes. OWNER_TOKEN
-comes from the environment or `.env` in the working directory (the environment wins) and is never printed.
-Exit codes are 0 ok and 1 when the app refuses (the detail is printed) or does not answer.
+The app starts and stops the pod and its tunnel itself; this command only calls the owner routes. There are
+two pull modes, `workers` (your own GPU workers, the app starts no pod) and `runpod` (the app starts a RunPod
+pod). OWNER_TOKEN comes from the environment or `.env` in the working directory (the environment wins) and is
+never printed. Exit codes are 0 ok and 1 when the app refuses (the detail is printed) or does not answer.
 """
 
 from __future__ import annotations
@@ -20,6 +21,8 @@ from radar_desk.compute import envfile
 from radar_desk.compute.desk import Desk, DeskError
 
 DEFAULT_APP = "http://127.0.0.1:8000"
+MODE_NAMES = {"modal": "Modal", "worker": "Own GPU workers", "runpod": "RunPod pod", "serverless": "RunPod serverless",
+              "fake": "Fake backend"}
 
 
 @dataclass
@@ -41,7 +44,8 @@ def err(line: str) -> None:
 def compute_lines(c: dict) -> list[str]:
     fixed = "" if c["changeable"] else ", fixed at start-up"
     url = f", {c['public_url']}" if c.get("public_url") else ""
-    lines = [f"compute: mode {c['mode']}{fixed}, tunnel {c['tunnel_mode']}{url}"]
+    mode = c["mode"]
+    lines = [f"compute: mode {mode} ({MODE_NAMES.get(mode, mode)}){fixed}, tunnel {c['tunnel_mode']}{url}"]
     runpod = c.get("runpod") or {}
     if isinstance(runpod.get("gpus"), list) and runpod["gpus"]:
         where = f" in {runpod['datacenter']}" if runpod.get("datacenter") else ""
@@ -77,8 +81,14 @@ def serverless_line(s: dict) -> str:
     return f"{head}, job {job['job_id'][:8]} {job.get('status') or 'status pending'} since {job.get('submitted_at')}"
 
 
+def cmd_workers(desk: Desk, args: argparse.Namespace) -> int:
+    for line in compute_lines(desk.set_mode("worker")):
+        out(line)
+    return 0
+
+
 def cmd_runpod(desk: Desk, args: argparse.Namespace) -> int:
-    c = desk.set_mode("worker")
+    c = desk.set_mode("runpod")
     if args.start:
         c = desk.pod_start()
     for line in compute_lines(c):
@@ -120,17 +130,19 @@ def cmd_status(desk: Desk, args: argparse.Namespace) -> int:
     return 0
 
 
-COMMANDS = {"runpod": cmd_runpod, "modal": cmd_modal, "serverless": cmd_serverless, "status": cmd_status,
-            "stop": cmd_stop}
+COMMANDS = {"workers": cmd_workers, "runpod": cmd_runpod, "modal": cmd_modal, "serverless": cmd_serverless,
+            "status": cmd_status, "stop": cmd_stop}
 
 
 def parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--app", help=f"the app's URL (default {DEFAULT_APP})")
     p = argparse.ArgumentParser(prog="python -m radar_desk.compute",
-                                description="Choose where the app scores: Modal, a RunPod pod or RunPod serverless.")
+                                description="Choose where the app scores: Modal, your own GPU workers, a RunPod pod "
+                                            "or RunPod serverless.")
     sub = p.add_subparsers(dest="command", required=True)
-    r = sub.add_parser("runpod", parents=[common], help="score on RunPod; the app starts a pod when work is queued")
+    sub.add_parser("workers", parents=[common], help="score on your own GPU workers; the app starts no pod")
+    r = sub.add_parser("runpod", parents=[common], help="score on a RunPod pod the app starts when work is queued")
     r.add_argument("--start", action="store_true", help="start the pod now")
     sub.add_parser("modal", parents=[common], help="score on Modal; an idle pod is stopped by the app")
     sub.add_parser("serverless", parents=[common],

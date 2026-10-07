@@ -40,7 +40,13 @@ from radar_desk.routes import (
 )
 from radar_desk.routes.health import VERSION
 from radar_desk.services import ServiceError, Services, build_services
-from radar_desk.services.compute import MODAL_ON_LOCAL, MODAL_ON_VOLUME, SERVERLESS_FALLBACK, mode_refusal
+from radar_desk.services.compute import (
+    MODAL_ON_LOCAL,
+    MODAL_ON_VOLUME,
+    RUNPOD_FALLBACK,
+    SERVERLESS_FALLBACK,
+    mode_refusal,
+)
 from radar_desk.storage import LocalStorage, describe_storage, storage_backend
 
 log = logging.getLogger(__name__)
@@ -54,17 +60,19 @@ def create_app(settings: Any = None, services: Services | None = None, start_pol
     """Build the app. Services are built here when not given, so routes work with or without the lifespan;
     the lifespan only runs the poller."""
     settings = settings if settings is not None else (services.settings if services else load_settings())
-    if settings.gpu_backend in ("modal", "serverless"):
+    if settings.gpu_backend in ("modal", "serverless", "runpod"):
         refusal = mode_refusal(settings, settings.gpu_backend)
         if refusal:
-            raise ConfigError(refusal if settings.gpu_backend == "modal" else f"GPU_BACKEND=serverless: {refusal}")
+            raise ConfigError(refusal if settings.gpu_backend == "modal"
+                              else f"GPU_BACKEND={settings.gpu_backend}: {refusal}")
     services = services if services is not None else build_services(settings)
     log.info("storage: %s (%s)", describe_storage(settings), storage_backend(settings))
+    services.compute.migrate_mode()
     mode = services.compute.mode if services.compute.changeable else None
-    if mode in ("modal", "serverless") and mode_refusal(settings, mode):
+    if mode in ("modal", "serverless", "runpod") and mode_refusal(settings, mode):
         # Refusing would leave the owner no way to switch back.
-        if mode == "serverless":
-            services.compute.fall_back(SERVERLESS_FALLBACK)
+        if mode in ("serverless", "runpod"):
+            services.compute.fall_back({"serverless": SERVERLESS_FALLBACK, "runpod": RUNPOD_FALLBACK}[mode])
         else:
             services.compute.fall_back(MODAL_ON_LOCAL if storage_backend(settings) == "local" else MODAL_ON_VOLUME)
 
