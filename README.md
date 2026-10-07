@@ -30,7 +30,18 @@ uv run python -m radar_desk  # http://127.0.0.1:8000, log in with OWNER_TOKEN
 
 `GPU_BACKEND=fake` runs without a GPU (results marked fake).
 
-Storage: one S3-compatible bucket for all modes. Set `S3_BUCKET` and the S3/AWS keys, and allow the app's origin in the bucket's CORS. Move old data with `uv run python scripts/migrate_storage.py --from modal_volume --to s3`.
+## Storage
+
+Set in `.env`. Unset `STORAGE_BACKEND` means `s3` with `S3_BUCKET`, else `local`.
+
+| `STORAGE_BACKEND` | Files go to | Compute modes that work |
+|---|---|---|
+| `s3` | S3-compatible bucket: set `S3_BUCKET` and the S3/AWS keys, allow the app's origin in the bucket's CORS | all |
+| `local` | a folder under `DATA_DIR` on the app's machine | own GPU workers, RunPod pod |
+| `modal_volume` | Modal Volume | Modal, own GPU workers, RunPod pod |
+| `runpod_volume` | RunPod network volume | RunPod serverless, own GPU workers, RunPod pod |
+
+The jobs page disables modes the storage or settings do not allow, with the reason; a saved mode that no longer fits falls back to own GPU workers. Move data between storages with `uv run python scripts/migrate_storage.py --from <old> --to <new>`.
 
 ## Compute
 
