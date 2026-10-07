@@ -28,6 +28,8 @@ set -a && source .env && set +a && uv run modal deploy worker/modal_app.py
 uv run python -m radar_desk  # http://127.0.0.1:8000, log in with OWNER_TOKEN
 ```
 
+`OWNER_TOKEN` and `SESSION_SECRET`: long random strings, e.g. `openssl rand -hex 32`. `OWNER_TOKEN` is the login (and `Authorization: Bearer` for the API); changing either logs everyone out. Workers never get it: each gets its own revocable token on the jobs page.
+
 `GPU_BACKEND=fake` runs without a GPU (results marked fake).
 
 ## Storage
