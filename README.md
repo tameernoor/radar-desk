@@ -39,7 +39,7 @@ App, storage, GPU and chat on your own machines, no cloud. In `.env`:
 ```sh
 STORAGE_BACKEND=local     # files under DATA_DIR
 GPU_BACKEND=worker        # own GPU workers
-LLM_PROVIDER=ollama       # optional local chat: ollama pull qwen3:8b
+LLM_PROVIDER=ollama       # optional local chat: Ollama running, ollama pull qwen3:8b
 CHAT_MODEL=qwen3:8b
 ```
 
@@ -47,8 +47,9 @@ CHAT_MODEL=qwen3:8b
 2. Start the app: `uv run python -m radar_desk`, open http://127.0.0.1:8000.
 3. Jobs page: create a worker token, copy the run line, run it on an NVIDIA machine (24 GB) that reaches the app. First start downloads the weights (about 2 GB) into the `radar-weights` Docker volume.
 4. Same machine as the app: the line has `--network host` (Linux). Docker Desktop (Mac, Windows): drop it and use `RADAR_DESK_URL=http://host.docker.internal:8000`.
+5. Other machine: start the app with `HOST=0.0.0.0`, open it at its LAN address before copying the run line, and build the image on the GPU machine.
 
-No NVIDIA card: `GPU_BACKEND=fake` shows the app with fake scores; `scripts/score_local.py` scores one scan on an Apple GPU or CPU (see Compute).
+No NVIDIA card: `GPU_BACKEND=fake` shows the app with fake scores; `scripts/score_local.py` scores one scan on an Apple GPU or CPU; it needs torch and a local copy of the weights (see its header).
 
 ## Storage
 
