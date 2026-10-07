@@ -1,6 +1,6 @@
 // Unit tests for src/compute.js. Playwright runs these in Node; no browser is opened.
 import { expect, test } from "@playwright/test";
-import { computePhrase, fromGpuStatus, modeControl, workerUrl } from "../src/compute.js";
+import { computePhrase, fromGpuStatus, modeControl, workerRunLine, workerUrl } from "../src/compute.js";
 
 const NOW = Date.parse("2026-10-02T12:00:00Z");
 const at = (secondsAgo) => new Date(NOW - secondsAgo * 1000).toISOString();
@@ -231,4 +231,14 @@ test("mode control: the four names do not depend on the RunPod keys", () => {
     for (const [value, name] of Object.entries(names)) expect(modeControl({ ...base, runpod }, value).label).toBe(name);
   }
   expect(modeControl(base, "other").label).toBe("other");
+});
+
+test("worker run line: host network and a note on loopback, plain on a real address", () => {
+  const local = workerRunLine("http://127.0.0.1:8000", "rdw_x", "ghcr.io/o/radar-worker:0.4");
+  expect(local.line).toBe("docker run --gpus all --network host -v radar-weights:/workspace -e RADAR_DESK_URL=http://127.0.0.1:8000 -e RADAR_WORKER_TOKEN=rdw_x ghcr.io/o/radar-worker:0.4");
+  expect(local.note).toContain("http://host.docker.internal:8000");
+  expect(workerRunLine("http://localhost:8000", "", "").line).toContain("--network host");
+  const remote = workerRunLine("https://abc.trycloudflare.com", "", "");
+  expect(remote.line).toBe("docker run --gpus all -v radar-weights:/workspace -e RADAR_DESK_URL=https://abc.trycloudflare.com -e RADAR_WORKER_TOKEN=<token> radar-worker");
+  expect(remote.note).toBeNull();
 });

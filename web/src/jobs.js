@@ -1,6 +1,6 @@
 import "./styles.css";
 import { ApiError, api, del, get, post } from "./api.js";
-import { computePhrase, modeControl, workerUrl } from "./compute.js";
+import { computePhrase, modeControl, workerUrl, workerRunLine } from "./compute.js";
 import { el, elapsed, shortId, usd, when } from "./format.js";
 import { wireLogout } from "./login.js";
 
@@ -232,10 +232,12 @@ async function workerAct(promise) {
 }
 
 function renderRunLine() {
-  // The pod needs the URL this browser is using (a tunnel URL when the app is opened through one).
-  const image = runTarget.image || "radar-worker";
-  document.getElementById("run-line").textContent =
-    `docker run --gpus all -v /workspace:/workspace -e RADAR_DESK_URL=${location.origin} -e RADAR_WORKER_TOKEN=${newToken || "<token>"} ${image}`;
+  // The worker needs the URL this browser is using (a tunnel URL when the app is opened through one).
+  const { line, note } = workerRunLine(location.origin, newToken, runTarget.image);
+  document.getElementById("run-line").textContent = line;
+  const noteEl = document.getElementById("run-note");
+  noteEl.textContent = note || "";
+  noteEl.hidden = !note;
 }
 
 async function revoke(token, button) {

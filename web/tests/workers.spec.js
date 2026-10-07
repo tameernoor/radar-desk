@@ -20,7 +20,9 @@ test("workers: create a token, copy the run line, revoke", async ({ page }) => {
 
   const runLine = section.locator("#run-line");
   await expect(runLine).toContainText("RADAR_WORKER_TOKEN=rdw_");
-  await expect(runLine).toContainText("-v /workspace:/workspace");
+  await expect(runLine).toContainText("-v radar-weights:/workspace");
+  await expect(runLine).toContainText("--network host"); // the spec server runs on 127.0.0.1
+  await expect(section.locator("#run-note")).toContainText("host.docker.internal");
 
   // Earlier runs may have left tokens named pod-1; the newest one is ours.
   const row = section.locator("#tokens-table tbody tr", { hasText: "pod-1" }).filter({ hasText: "active" }).last();

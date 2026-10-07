@@ -82,7 +82,8 @@
         <pre class="log"><code id="run-line"></code></pre>
         <button type="button" id="run-copy">Copy</button>
       </div>
-      <p class="muted small">The app must be reachable from the worker, so RADAR_DESK_URL is a URL the worker can open (this origin on the same network, or WORKER_PUBLIC_URL / a tunnel). The weights are filled on /workspace on first start.</p>
+      <p class="muted small" id="run-note" hidden></p>
+      <p class="muted small">The app must be reachable from the worker, so RADAR_DESK_URL is a URL the worker can open (this origin on the same network, or WORKER_PUBLIC_URL / a tunnel). The weights download into the radar-weights volume on first start.</p>
     </section>
   </main>
   <footer class="footer">

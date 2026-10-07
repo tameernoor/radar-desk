@@ -92,3 +92,21 @@ export function fromGpuStatus(g, scanName = shortId) {
     serverless: g.serverless ?? null,
   };
 }
+
+// The docker run line for an own GPU worker. A named volume keeps the weights between runs. When the
+// app is opened at a loopback address the worker is on this same machine, where 127.0.0.1 inside the
+// container is the container itself, so the line uses the host network and the note names the
+// Docker Desktop alternative.
+const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
+export function workerRunLine(origin, token, image) {
+  const url = new URL(origin);
+  const local = LOOPBACK.has(url.hostname);
+  const line = ["docker run --gpus all", local ? "--network host" : null, "-v radar-weights:/workspace",
+    `-e RADAR_DESK_URL=${url.origin}`, `-e RADAR_WORKER_TOKEN=${token || "<token>"}`, image || "radar-worker"]
+    .filter(Boolean).join(" ");
+  const note = local
+    ? `Same machine: --network host works on Linux. With Docker Desktop (Mac, Windows) drop --network host and use RADAR_DESK_URL=${url.protocol}//host.docker.internal:${url.port || (url.protocol === "https:" ? "443" : "80")}.`
+    : null;
+  return { line, note };
+}
+

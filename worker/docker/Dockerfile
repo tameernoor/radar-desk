@@ -3,7 +3,7 @@
 # Build from the repo root:
 #   docker buildx build --platform linux/amd64 -f worker/docker/Dockerfile -t radar-worker .
 # Run:
-#   docker run --gpus all -v /workspace:/workspace -e RADAR_DESK_URL=... -e RADAR_WORKER_TOKEN=... radar-worker
+#   docker run --gpus all -v radar-weights:/workspace -e RADAR_DESK_URL=... -e RADAR_WORKER_TOKEN=... radar-worker
 #
 # The pins mirror the Modal image in worker/modal_app.py; keep the two in step.
 # The base is plain Python: torch pulls its CUDA libraries as nvidia-* pip packages and the driver
