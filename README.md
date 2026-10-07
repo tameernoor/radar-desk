@@ -4,6 +4,8 @@ Runs RADAR (Alibaba DAMO Academy's abdominal CT model, Science 2026) on a CT sca
 
 Research use only. Not a medical device.
 
+![radar-desk scoring DAMO's demo CT, with organ outlines, the 146 scores and the chat](assets/screenshot.png)
+
 ## Use
 
 - Upload a `.nii` / `.nii.gz` scan and press Score.
