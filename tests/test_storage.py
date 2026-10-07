@@ -388,7 +388,7 @@ def test_make_storage_picks_the_volume(tmp_path: Path):
 # RunPod volume adapter: the S3 adapter on the volume's S3 API, with /_volume routes and volume:// refs
 
 
-RUNPOD_BUCKET = "8yk0y6v12n"
+RUNPOD_BUCKET = "vol0exampl"
 
 
 def _runpod(**kw):
@@ -513,8 +513,8 @@ def test_browser_via_api_only_on_the_volume_adapters(local, mv, s3):
 
 
 @pytest.mark.parametrize("over,name", [
-    ({"s3_bucket": "radar-desk-data", "s3_endpoint_url": "https://fly.storage.tigris.dev"},
-     "Tigris bucket radar-desk-data"),
+    ({"s3_bucket": "my-radar-bucket", "s3_endpoint_url": "https://fly.storage.tigris.dev"},
+     "Tigris bucket my-radar-bucket"),
     ({"s3_bucket": "b", "s3_endpoint_url": "https://s3.example.com:9000/x"}, "S3 bucket b (s3.example.com)"),
     ({"s3_bucket": "b", "s3_endpoint_url": "https://nottigris.dev"}, "S3 bucket b (nottigris.dev)"),
     ({"s3_bucket": "b"}, "S3 bucket b"),

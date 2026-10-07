@@ -8,7 +8,7 @@ The scans are not committed (about 470 MB together). `manifest.json` holds their
 | image1 | `merlin-image1.nii.gz` | huggingface.co/stanfordmimi/Merlin |
 | AC423ccbe | `AC423ccbe.nii.gz` | `data/demo_cases/` in damo-radar, the upstream demo case |
 
-Tests that need the files read `RADAR_FIXTURE_DIR` (default `/Users/lars/Downloads/merlin-radar`) and skip when it is missing.
+Tests that need the files read `RADAR_FIXTURE_DIR` (default this `fixtures/` folder, where `*.nii.gz` is gitignored) and skip when it is missing.
 
 ## expected/
 

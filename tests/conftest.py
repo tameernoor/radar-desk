@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "tests") not in sys.path:
     sys.path.insert(0, str(ROOT / "tests"))
 
-FIXTURE_DIR = Path(os.environ.get("RADAR_FIXTURE_DIR", "/Users/lars/Downloads/merlin-radar"))
+FIXTURE_DIR = Path(os.environ.get("RADAR_FIXTURE_DIR") or ROOT / "fixtures")
 FIXTURE_FILES = {
     "AC4214dbd": "merlin-AC4214dbd.nii.gz",
     "AC4240fff": "merlin-AC4240fff.nii.gz",

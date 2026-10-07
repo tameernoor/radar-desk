@@ -188,7 +188,7 @@ class FakeS3:
 @pytest.fixture
 def rpapi(make_api):  # noqa: F811
     s3 = FakeS3()
-    storage = RunPodVolumeStorage("8yk0y6v12n", "EU-RO-1", "user_x", "rps_x", 300 * 1024 * 1024, client=s3)
+    storage = RunPodVolumeStorage("vol0exampl", "EU-RO-1", "user_x", "rps_x", 300 * 1024 * 1024, client=s3)
     rpapi = make_api(storage_backend="runpod_volume", storage=storage)
     rpapi.volume = s3  # the Modal tests read .volume.files; the fake keeps the same shape
     return rpapi

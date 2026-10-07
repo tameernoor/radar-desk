@@ -38,7 +38,7 @@ class FakeApp:
                 "serverless": self.serverless,
                 "pod": self.pod, "in_flight": None, "queued": 0, "held": [], "problem": self.problem,
                 "last_event": None, "spend_month_usd": 1.234, "budget_usd": 10.0, "month": "2026-10",
-                "storage": {"backend": "s3", "name": "Tigris bucket radar-desk-data", "modes": {
+                "storage": {"backend": "s3", "name": "Tigris bucket my-radar-bucket", "modes": {
                     "modal": {"available": True, "reason": None, "note": None},
                     "worker": {"available": True, "reason": None, "note": None},
                     "runpod": {"available": True, "reason": None, "note": None},
@@ -148,7 +148,7 @@ def test_status_prints_health_compute_and_workers(world, capsys):
         "serverless: not configured",
         "problem: RunPod did not answer",
         "spend: $1.23 of $10.00 in 2026-10",
-        "storage: Tigris bucket radar-desk-data, s3; modal yes, worker yes, runpod yes, serverless no",
+        "storage: Tigris bucket my-radar-bucket, s3; modal yes, worker yes, runpod yes, serverless no",
         "worker: runpod-abc123, online, job job_1",
     ]
     assert all(m == "GET" for m, _, _ in app.calls)
