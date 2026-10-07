@@ -287,7 +287,9 @@ def ensure_weights(target_dir, manifest: dict, *, fallback_dir=None, download=No
     target = Path(target_dir)
     notes, done = [], None
 
-    if target.is_dir() and check_weights(target, manifest)["ok"]:
+    # every file by sha256: the BERT and text-embedding files are pickles that torch.load runs, so a
+    # size match alone would let anyone who can write the volume run code in the worker
+    if target.is_dir() and check_weights(target, manifest, hash_all=True)["ok"]:
         d, source = target, "volume"
     else:
         d = source = None
@@ -307,7 +309,7 @@ def ensure_weights(target_dir, manifest: dict, *, fallback_dir=None, download=No
                 raise RuntimeError(f"weights in {target} are not usable and no fallback directory was given")
             d = Path(fallback_dir)
             d.mkdir(parents=True, exist_ok=True)
-            if check_weights(d, manifest)["ok"]:
+            if check_weights(d, manifest, hash_all=True)["ok"]:
                 source = "local"
             else:
                 source = "downloaded-to-local"

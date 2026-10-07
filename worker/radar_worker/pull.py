@@ -64,6 +64,7 @@ MANIFEST = PACKAGE_PARENT / "weights.json"
 DEFAULT_WEIGHTS_DIR = "/workspace/radar-weights"
 USER_AGENT = "radar-worker"
 RUNPOD_API_URL = "https://api.runpod.io/v2"
+SAME_MACHINE_HOSTS = {"localhost", "127.0.0.1", "::1", "host.docker.internal"}
 
 
 def log(msg: str) -> None:
@@ -663,6 +664,12 @@ def parse_args(argv=None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def token_in_clear(base_url: str) -> bool:
+    """True when the app is reached over plain http on another machine."""
+    parts = urllib.parse.urlsplit(base_url)
+    return parts.scheme == "http" and (parts.hostname or "") not in SAME_MACHINE_HOSTS
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
     base_url = os.environ.get("RADAR_DESK_URL", "").strip()
@@ -671,6 +678,9 @@ def main(argv=None) -> int:
     if missing:
         log(f"missing environment: {', '.join(missing)}")
         return 2
+    if token_in_clear(base_url):
+        log(f"warning: {base_url} is plain http, so the worker token travels unencrypted; "
+            "use an https address (a tunnel or WORKER_PUBLIC_URL) unless the app runs on this machine")
     weights_dir = (os.environ.get("RADAR_WEIGHTS_RESOLVED") or os.environ.get("RADAR_WEIGHTS_DIR")
                    or DEFAULT_WEIGHTS_DIR)
     scorer = RealScorer(weights_dir, os.environ.get("RADAR_DEVICE", "auto").strip() or "auto", MANIFEST,

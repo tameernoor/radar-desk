@@ -325,7 +325,7 @@ def test_cli_defaults_fit_a_runpod_pod(monkeypatch):
     for k in ("RADAR_WEIGHTS_DIR", "RADAR_WEIGHTS_FALLBACK", "RADAR_WEIGHTS_MANIFEST"):
         monkeypatch.delenv(k, raising=False)
     args = cli.parse_args([])
-    assert (args.dir, args.fallback) == ("/workspace/radar-weights", "/root/radar-weights")
+    assert (args.dir, args.fallback) == ("/workspace/radar-weights", str(Path.home() / "radar-weights"))
     monkeypatch.setenv("RADAR_WEIGHTS_DIR", "/runpod-volume/w")
     monkeypatch.setenv("RADAR_WEIGHTS_FALLBACK", "/tmp/w")
     args = cli.parse_args([])

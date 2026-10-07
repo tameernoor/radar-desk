@@ -13,6 +13,7 @@ on:
       - "scripts/ensure_weights.py"
       - ".github/workflows/worker-image.yml"
 
+# Actions are pinned by commit (the tag in the comment), so a moved tag cannot change a build.
 permissions:
   contents: read
   packages: write
@@ -31,9 +32,9 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           docker image prune --all --force
           df -h /
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -48,7 +49,7 @@ jobs:
             if [[ "$GITHUB_REF" == refs/tags/worker-v* ]]; then echo "$image:${GITHUB_REF#refs/tags/worker-v}"; fi
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: worker/docker/Dockerfile
@@ -56,3 +57,30 @@ jobs:
           # zstd layers extract several times faster than gzip on slow RunPod hosts (needs Docker 23+ there).
           outputs: type=image,push=true,compression=zstd,compression-level=3,force-compression=true,oci-mediatypes=true
           tags: ${{ steps.tags.outputs.list }}
+          # a record of how the image was built and the list of every package in it, stored with the image
+          provenance: mode=max
+          sbom: true
+      - name: Free disk space for the scan
+        run: docker buildx prune --all --force && df -h /
+      # Known vulnerabilities in the pushed image, listed in the run summary. Report only: torch and
+      # transformers are pinned on purpose (scores were checked against DAMO's at these versions), so a
+      # failing scan would block every build.
+      - name: Scan image
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 (trivy v0.70.0)
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          image-ref: ghcr.io/${{ github.repository_owner }}/radar-worker:${{ github.sha }}
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: table
+          output: trivy.txt
+          exit-code: "0"
+      - name: Scan summary
+        if: always()
+        run: |
+          cat trivy.txt 2>/dev/null || echo "no scan output"
+          { echo '### Image vulnerabilities (HIGH, CRITICAL, fixable)'; echo '```'; cat trivy.txt 2>/dev/null || echo "no scan output"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

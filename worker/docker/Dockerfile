@@ -5,7 +5,7 @@
 # Run:
 #   docker run --gpus all -v radar-weights:/workspace -e RADAR_DESK_URL=... -e RADAR_WORKER_TOKEN=... radar-worker
 #
-# The pins mirror the Modal image in worker/modal_app.py; keep the two in step.
+# The pins (worker/docker/requirements.in) mirror the Modal image in worker/modal_app.py; keep the two in step.
 # The base is plain Python: torch pulls its CUDA libraries as nvidia-* pip packages and the driver
 # comes from the host, so a CUDA base image mostly adds size. The digest is python:3.10-slim as
 # built and smoke-tested on 2026-10-02; move it on purpose, not by accident.
@@ -13,25 +13,17 @@ FROM python:3.10-slim@sha256:c1aaf3d03e14944a039a1647e0b3f6f34c6bee517bac6ff3802
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# the pip bundled with the base rejects the torch index's dependency wheels over name
-# spelling (Jinja2 against jinja2), so a newer pip comes first
-RUN pip install --no-cache-dir pip==24.3.1
+# The worker runs as radar; the entrypoint starts as root only to hand it the weights directory.
+# /workspace belongs to radar so a fresh named volume mounted there does too.
+RUN useradd --create-home --uid 1000 --user-group radar \
+    && mkdir -p /workspace && chown radar:radar /workspace
 
-# torch alone first, from the CUDA 12.4 index; 2.5.1 because torch.load defaults change in 2.6
-RUN pip install --no-cache-dir torch==2.5.1 --index-url https://download.pytorch.org/whl/cu124
-
-RUN pip install --no-cache-dir \
-    "numpy<2" \
-    monai==1.4.0 \
-    nibabel \
-    SimpleITK \
-    transformers==4.25.1 \
-    huggingface_hub==0.16.4 \
-    pandas \
-    tqdm \
-    scipy \
-    requests \
-    "runpod>=1.10.1,<2"
+# Every package at an exact version with its sha256 (requirements.in says how to recompile).
+# A newer pip first, hash-checked like the rest.
+COPY worker/docker/requirements-pip.txt worker/docker/requirements.txt /tmp/
+RUN pip install --no-cache-dir --require-hashes -r /tmp/requirements-pip.txt \
+    && pip install --no-cache-dir --require-hashes -r /tmp/requirements.txt \
+    && rm /tmp/requirements-pip.txt /tmp/requirements.txt
 
 # NVIDIA_*: what the CUDA base image used to set; the container runtime reads them to expose the GPU
 ENV PYTHONUNBUFFERED=1 \

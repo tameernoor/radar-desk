@@ -1,0 +1,18 @@
+# Worker image dependencies. Compile into requirements.txt (exact versions, sha256 hashes) with
+#   uv pip compile worker/docker/requirements.in -o worker/docker/requirements.txt --generate-hashes \
+#     --python-version 3.10 --python-platform x86_64-manylinux_2_28
+# The versions are those installed in worker image :0.4 (scores checked against DAMO's).
+# The pins mirror the Modal image in worker/modal_app.py; keep the two in step.
+# torch 2.5.1 from the CUDA 12.4 wheel; 2.5.1 because torch.load defaults change in 2.6
+torch @ https://download.pytorch.org/whl/cu124/torch-2.5.1%2Bcu124-cp310-cp310-linux_x86_64.whl
+numpy==1.26.4
+monai==1.4.0
+nibabel==5.4.2
+SimpleITK==2.5.6
+transformers==4.25.1
+huggingface_hub==0.16.4
+pandas==2.3.3
+tqdm==4.70.1
+scipy==1.15.3
+requests==2.34.2
+runpod==1.12.0

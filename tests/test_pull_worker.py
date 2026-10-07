@@ -516,3 +516,12 @@ def test_cli_help_without_torch():
     probe = subprocess.run([sys.executable, "-c", "import sys, radar_worker.pull; print('torch' in sys.modules)"],
                            capture_output=True, text=True, env=env, timeout=30, check=False)
     assert probe.stdout.strip() == "False", probe.stderr
+
+
+def test_token_in_clear_only_for_http_to_another_machine():
+    assert pull.token_in_clear("http://192.168.1.20:8000")
+    assert pull.token_in_clear("http://desk.example.org")
+    for same_machine in ("http://127.0.0.1:8000", "http://localhost:8000", "http://[::1]:8000",
+                         "http://host.docker.internal:8000"):
+        assert not pull.token_in_clear(same_machine)
+    assert not pull.token_in_clear("https://abc.trycloudflare.com")

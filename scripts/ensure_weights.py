@@ -8,7 +8,7 @@ missing or read-only. Prints the report as JSON; exit 1 on failure.
 
 The defaults fit a RunPod pod, where a network volume mounts at /workspace: --dir is
 $RADAR_WEIGHTS_DIR or /workspace/radar-weights, --fallback is $RADAR_WEIGHTS_FALLBACK or
-/root/radar-weights (container disk).
+~/radar-weights (container disk).
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DIR = "/workspace/radar-weights"  # RunPod pods mount the network volume at /workspace
-DEFAULT_FALLBACK = "/root/radar-weights"
+DEFAULT_FALLBACK = str(Path.home() / "radar-weights")
 if str(ROOT / "worker") not in sys.path:
     sys.path.insert(0, str(ROOT / "worker"))
 

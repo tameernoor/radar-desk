@@ -5,6 +5,8 @@
 !worker/weights.json
 !scripts/ensure_weights.py
 !worker/docker/entrypoint.sh
+!worker/docker/requirements.txt
+!worker/docker/requirements-pip.txt
 !worker/radar_worker
 **/__pycache__
 **/*.pyc

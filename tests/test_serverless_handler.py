@@ -337,3 +337,17 @@ def test_default_scorer_is_built_once_from_the_env(monkeypatch, tmp_path):
     first = serverless._scorer()
     assert first.weights_dir == str(tmp_path / "w") and first.device == "cpu"
     assert serverless._scorer() is first
+
+
+def test_volume_permission_error_names_the_fix(tmp_path, monkeypatch):
+    from radar_worker import serverless
+
+    def denied(*_a, **_k):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(serverless, "_stored", denied)
+    event = {"input": {"job_id": "j1", "source": "volume://scans/s.nii.gz", "result": "volume://jobs/j1/result.json",
+                       "artefacts": {n: f"volume://jobs/j1/{n}" for n in serverless.jobmod.ARTEFACTS}}}
+    out = serverless._handle(event, scorer=object(), root=tmp_path, wait_s=0)
+    assert out["ok"] is False and out["error"]["class"] == "permission_error"
+    assert "RADAR_RUN_AS_ROOT" in out["error"]["message"]

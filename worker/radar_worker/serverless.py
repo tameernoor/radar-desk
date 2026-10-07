@@ -126,22 +126,28 @@ def _handle(event: dict, *, scorer=None, root=None, wait_s=None, clock=time.mono
             result_path = volume_path(result_ref, root)
         except ValueError as err:
             return jobmod.error_result(job_id, "input_error", str(err))
-        stored = _stored(job_id, result_path)
-        if stored is not None:
-            log(job_id, f"result already stored at {result_ref}; returning it")
-            return stored
-        for path in [*paths, result_path]:
-            path.unlink(missing_ok=True)  # an earlier attempt that crashed mid-write
-        if not _wait_for_source(src, expected_size, wait_s, clock, sleep):
-            return jobmod.error_result(job_id, "input_error",
-                                       f"source not visible on the volume after {wait_s:g} s: {source}")
-        fetch, publish = volume_io(source, artefacts, root, lambda: None)
-        result = jobmod.plain(jobmod.run_job(job_id, fetch, publish, artefact_keys, scorer))
-        result_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = result_path.with_name(result_path.name + ".tmp")
-        tmp.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, result_path)  # a worker killed mid-write leaves no truncated result.json
-        return result
+        try:
+            stored = _stored(job_id, result_path)
+            if stored is not None:
+                log(job_id, f"result already stored at {result_ref}; returning it")
+                return stored
+            for path in [*paths, result_path]:
+                path.unlink(missing_ok=True)  # an earlier attempt that crashed mid-write
+            if not _wait_for_source(src, expected_size, wait_s, clock, sleep):
+                return jobmod.error_result(job_id, "input_error",
+                                           f"source not visible on the volume after {wait_s:g} s: {source}")
+            fetch, publish = volume_io(source, artefacts, root, lambda: None)
+            result = jobmod.plain(jobmod.run_job(job_id, fetch, publish, artefact_keys, scorer))
+            result_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = result_path.with_name(result_path.name + ".tmp")
+            tmp.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, result_path)  # a worker killed mid-write leaves no truncated result.json
+            return result
+        except PermissionError as err:
+            # the worker runs as radar unless RADAR_RUN_AS_ROOT=1, which the endpoint script sets for this storage
+            return jobmod.error_result(job_id, "permission_error",
+                                       f"{err}; the worker cannot write to the volume, run "
+                                       "scripts/runpod_endpoint.py update so the endpoint gets RADAR_RUN_AS_ROOT=1")
 
     def fetch(work: Path, _log) -> Path:
         dest = Path(work) / source_name(urllib.parse.urlsplit(source).path)

@@ -19,6 +19,10 @@ applied to each card's id and name. It refuses while RUNPOD_ENDPOINT_ID is set u
 `delete` also cancels queued and running jobs on RunPod, so it refuses while any are in flight unless
 `--force`. Management calls go to api.runpod.io, `/health` to the jobs host api.runpod.ai.
 
+The worker runs as an unprivileged user; with STORAGE_BACKEND=runpod_volume the env also carries
+RADAR_RUN_AS_ROOT=1, because results go into job folders the app made on the volume. Run `update` after
+changing STORAGE_BACKEND.
+
 Exit codes are 0 ok, 1 refused or a RunPod error, 2 invalid settings. The API key is never printed.
 """
 
@@ -33,6 +37,7 @@ import httpx
 
 from radar_desk.compute.runpod import BLACKWELL, RunPodApi, RunPodError
 from radar_desk.config import ConfigError, Settings, load_settings
+from radar_desk.storage import storage_backend
 
 JOBS_URL = "https://api.runpod.ai/v2"
 NAME = "radar-desk"
@@ -77,9 +82,12 @@ def pinned_image(settings: Settings) -> str:
     return image
 
 
-def worker_env(image: str) -> dict[str, str]:
-    return {"RADAR_WEIGHTS_DIR": "/runpod-volume/radar-weights", "RADAR_DATA_ROOT": "/runpod-volume",
-            "RADAR_IMAGE": image, "RADAR_DEVICE": "auto"}
+def worker_env(image: str, settings: Settings) -> dict[str, str]:
+    env = {"RADAR_WEIGHTS_DIR": "/runpod-volume/radar-weights", "RADAR_DATA_ROOT": "/runpod-volume",
+           "RADAR_IMAGE": image, "RADAR_DEVICE": "auto"}
+    if storage_backend(settings) == "runpod_volume":
+        env["RADAR_RUN_AS_ROOT"] = "1"  # results go into job folders the app made on the volume
+    return env
 
 
 def workers(settings: Settings) -> dict:
@@ -124,7 +132,7 @@ def cmd_create(api: RunPodApi, settings: Settings, args: argparse.Namespace, dep
     body = {"name": NAME, "type": "QUEUE",
             "image": image, "registry": settings.runpod_registry_auth_id, "disk": 20,
             "cmd": ["python3", "-u", "-m", "radar_worker.serverless"],
-            "env": worker_env(image),
+            "env": worker_env(image, settings),
             "gpu": gpu,
             "scaling": {"type": "QUEUE_DELAY", "queueDelay": 4},
             "workers": workers(settings),
@@ -176,7 +184,7 @@ def cmd_update(api: RunPodApi, settings: Settings, args: argparse.Namespace, dep
     need(settings, "runpod_endpoint_id", "worker_image")
     image = pinned_image(settings)
     body = {"image": image, "workers": workers(settings), "timeout": settings.gpu_timeout_s * 1000,
-            "env": worker_env(image)}
+            "env": worker_env(image, settings)}
     ep = api.call("PATCH", f"/serverless/{settings.runpod_endpoint_id}", json=body) or {}
     deps.out(f"updated endpoint {ep.get('id') or settings.runpod_endpoint_id}: image {image}, "
              f"workers max 1, idleTimeout {settings.runpod_serverless_idle_s} s, timeout {body['timeout']} ms")

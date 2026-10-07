@@ -280,3 +280,11 @@ def test_endpoint_help_runs_without_settings(tmp_path):
                           cwd=tmp_path, env=env, capture_output=True, text=True, check=False)
     assert proc.returncode == 0, proc.stderr
     assert "create" in proc.stdout and "delete" in proc.stdout
+
+
+def test_endpoint_keeps_root_only_when_results_go_to_the_runpod_volume():
+    script = _endpoint_script()
+    image = "ghcr.io/o/radar-worker:0.5"
+    assert "RADAR_RUN_AS_ROOT" not in script.worker_env(image, _settings())
+    on_volume = _settings(storage_backend="runpod_volume")
+    assert script.worker_env(image, on_volume)["RADAR_RUN_AS_ROOT"] == "1"
