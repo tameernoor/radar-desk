@@ -8,8 +8,8 @@
 # The pins (worker/docker/requirements.in) mirror the Modal image in worker/modal_app.py; keep the two in step.
 # The base is plain Python: torch pulls its CUDA libraries as nvidia-* pip packages and the driver
 # comes from the host, so a CUDA base image mostly adds size. The digest is python:3.10-slim as
-# built and smoke-tested on 2026-10-02; move it on purpose, not by accident.
-FROM python:3.10-slim@sha256:c1aaf3d03e14944a039a1647e0b3f6f34c6bee517bac6ff380215ee099c4e808
+# published 2026-10-06 (worker 0.6); move it on purpose, not by accident.
+FROM python:3.10-slim@sha256:6ff506466f8b1e981719b468cc0023b8ef000b983cdec0eafe119d01f379e31d
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
@@ -20,10 +20,13 @@ RUN useradd --create-home --uid 1000 --user-group radar \
 
 # Every package at an exact version with its sha256 (requirements.in says how to recompile).
 # A newer pip first, hash-checked like the rest.
+# setuptools and wheel go afterwards: the scan flags them and eager inference never imports them.
+# triton does (runtime/build.py), so torch.compile does not work in this image.
 COPY worker/docker/requirements-pip.txt worker/docker/requirements.txt /tmp/
 RUN pip install --no-cache-dir --require-hashes -r /tmp/requirements-pip.txt \
     && pip install --no-cache-dir --require-hashes -r /tmp/requirements.txt \
-    && rm /tmp/requirements-pip.txt /tmp/requirements.txt
+    && rm /tmp/requirements-pip.txt /tmp/requirements.txt \
+    && pip uninstall --yes setuptools wheel
 
 # NVIDIA_*: what the CUDA base image used to set; the container runtime reads them to expose the GPU
 ENV PYTHONUNBUFFERED=1 \
