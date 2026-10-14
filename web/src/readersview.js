@@ -10,7 +10,11 @@ const HOLDS = { needs_modal: "needs Modal compute", budget: "over the monthly GP
 export function createReadersView({ root, onOrgan, onRetryReads, onRunNv }) {
   const state = { view: null, threshold: 50, open: new Set(), foldOpen: false, othersOpen: false, error: null };
 
-  const readers = () => (state.view?.has_report ? ["report", "radar", "nv"] : ["radar", "nv"]);
+  // No Report column without a report, no NV column when NV cannot run and never did.
+  const readers = () => {
+    const nv = state.view?.nv;
+    return [state.view?.has_report ? "report" : null, "radar", nv?.unavailable && !nv.job ? null : "nv"].filter(Boolean);
+  };
   const link = (label, run) => el("button", { type: "button", class: "link rretry", onclick: run }, label);
   const note = (text) => el("span", { class: "muted small" }, text);
 
@@ -68,7 +72,7 @@ export function createReadersView({ root, onOrgan, onRetryReads, onRunNv }) {
     if (row.nv?.in_view === false) parts.push(el("p", { class: "muted small" }, `Only ${Math.round(row.nv.coverage * 100)}% of the ${row.organ.toLowerCase()} is inside NV's view.`));
     for (const a of row.asked) {
       parts.push(
-        el("p", { class: "rasked" }, el("strong", {}, "Asked NV: "), a.question, el("br"), `NV: ${a.answer}`, a.differs ? el("span", { class: "rdiffers" }, " (differs from NV's report)") : null),
+        el("p", { class: "rasked" }, el("strong", {}, "Asked NV: "), a.question, el("br"), `NV: ${a.answer ?? "no answer"}`, a.differs ? el("span", { class: "rdiffers" }, " NV's answer differs from its report") : null),
       );
     }
     return el("div", { class: "rdetails" }, parts);
@@ -114,7 +118,7 @@ export function createReadersView({ root, onOrgan, onRetryReads, onRunNv }) {
   }
 
   function legend() {
-    return el("p", { class: "rkey muted small" }, [...KEY.map((s) => `${SYMBOL[s]} ${STATE_TEXT[s]}`), "⚑ disagree"].join("   "));
+    return el("p", { class: "rkey muted small" }, [...KEY.map((s) => `${SYMBOL[s]} ${STATE_TEXT[s]}`), "⚑ disagree"].map((t) => el("span", {}, t)));
   }
 
   function render() {

@@ -43,6 +43,7 @@ test("readers tab: rows, flags, fold, display line, words, jump, NV's view", asy
   await expect(readers.locator('.rrow[data-row="ascites"] [data-reader="radar"]')).toHaveAttribute("data-state", "not_scored");
   await expect(readers.getByText(foldText(at50.folded.length))).toBeVisible();
 
+  await page.waitForFunction(() => Boolean(window.__radar?.setThreshold)); // the tab can render before the page tools are registered
   // The display line moves RADAR's dots.
   await page.evaluate(() => window.__radar.setThreshold(1));
   await expect(readers.locator(".rrow.flagged")).toHaveCount(arrange(view.rows, { threshold: 1 }).flagged.length);
@@ -64,6 +65,10 @@ test("readers tab: rows, flags, fold, display line, words, jump, NV's view", asy
   await page.getByRole("button", { name: "NV's view" }).click();
   await expect(page.getByRole("button", { name: "NV's view" })).toHaveAttribute("aria-pressed", "true");
   expect(await page.evaluate(() => window.__radar.viewState().nv_view)).toBe(true);
+
+  // Legend items are separate, and the NV column and button exist because the seeded NV job is done.
+  await expect(readers.locator(".rkey span")).toHaveCount(6);
+  await expect(readers.locator('.rrow [data-reader="nv"]').first()).toBeVisible();
 
   // Back to RADAR's list.
   await page.getByRole("tab", { name: "RADAR findings" }).click();

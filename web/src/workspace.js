@@ -472,6 +472,7 @@ async function loadResult(job) {
   }
   await ws.viewer.ready;
   if (ws.ctLoaded) await loadMask(job);
+  loadReaders();
 }
 
 let maskJobId = null;
@@ -501,6 +502,9 @@ async function loadReaders() {
     return;
   }
   ws.readersView.setView(ws.readers);
+  const hasCrop = Boolean(ws.readers.nv?.crop?.box_mm);
+  $("nv-view-toggle").hidden = !hasCrop;
+  if (!hasCrop && ws.nvViewOn) toggleNvView(false);
   if (isBusy(ws.readers)) readersTimer = setTimeout(loadReaders, 5000);
 }
 

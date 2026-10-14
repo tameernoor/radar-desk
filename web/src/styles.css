@@ -294,14 +294,15 @@ body.focus .viewer-notice:not(.viewer-prompt) { top: calc(var(--toolbar-h, 2.5re
 .rrow.jumps { cursor: pointer; }
 .rrow:hover { background: var(--panel-2); }
 .rflag { color: var(--warn); }
-.rcell { text-align: center; }
-.rcell[data-state="present"] { color: var(--text); }
-.rcell[data-state="absent"], .rcell[data-state="not_mentioned"], .rcell[data-state="outside"], .rcell[data-state="not_scored"], .rcell[data-state="pending"] { color: var(--muted); }
+.rcell { text-align: center; font-size: 1.05em; line-height: 1; color: var(--muted); }
+.rcell[data-state="present"], .rcell[data-state="absent"] { color: var(--text); }
+.rcell[data-state="outside"], .rcell[data-state="not_scored"] { font-size: 1.5em; }
 .rexpand { background: none; border: none; color: var(--muted); padding: 0; }
 .rdetails { padding: 0.3rem 0.4rem 0.5rem 2.6em; font-size: 0.85rem; }
 .rdetails p { margin: 0.15rem 0; }
 .rdiffers { color: var(--warn); }
 .rfold { display: block; background: none; border: none; color: var(--muted); padding: 0.35rem 0; text-align: left; }
 .rothers { margin: 0 0 0.4rem 1.2em; padding: 0; font-size: 0.85rem; }
-.rkey { margin-top: 0.6rem; }
+.rkey { position: sticky; bottom: 0; background: var(--panel); margin: 0; padding: 0.3rem 0; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 0.15rem 0.8rem; }
+.rkey span { white-space: nowrap; }
 .rretry { color: var(--warn); }
