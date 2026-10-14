@@ -48,6 +48,13 @@ test("readers tab: rows, flags, fold, display line, words, jump, NV's view", asy
   await page.evaluate(() => window.__radar.setThreshold(1));
   await expect(readers.locator(".rrow.flagged")).toHaveCount(arrange(view.rows, { threshold: 1 }).flagged.length);
   await page.evaluate(() => window.__radar.setThreshold(50));
+  // The display line sits in the Compare section, not pinned above the tab, and stays in step with the page tools.
+  await expect(page.locator(".threshold")).toBeHidden();
+  await readers.getByRole("slider", { name: "Display line" }).fill("1");
+  await expect(readers.locator(".rrow.flagged")).toHaveCount(arrange(view.rows, { threshold: 1 }).flagged.length);
+  expect(await page.evaluate(() => window.__radar.viewState().threshold_pct)).toBe(1);
+  await page.evaluate(() => window.__radar.setThreshold(50));
+  await expect(readers.getByRole("slider", { name: "Display line" })).toHaveValue("50");
 
   // Each reader in its own words.
   await readers.locator('.rrow[data-row="ascites"] .rexpand').click();
@@ -89,7 +96,6 @@ test("readers tab: reports and questions are visible on open, a question is answ
   const readers = page.locator('#readers[data-ready="true"]');
   await expect(readers.getByText("Three readers of the same scan")).toBeVisible();
 
-  await page.screenshot({ path: "../.superpowers/sdd/2026-10-14-readers-lens/ux-top.png" });
   // Reports: NV's impression in full, its findings and reasoning folded, never the answer tag; the radiologist's text.
   const nv = readers.locator('[data-card="nv"]');
   await expect(nv.locator('[data-part="impression"]')).toContainText("2. Left renal cyst.");
@@ -106,7 +112,7 @@ test("readers tab: reports and questions are visible on open, a question is answ
   const ask = readers.locator("section", { has: page.getByRole("heading", { name: "Ask NV-Reason-CT" }) });
   const ids = [...new Set([...view.queries.general, ...view.rows.flatMap((r) => r.queries || [])].map((x) => x.id))];
   await expect(ask.locator(".rchip")).toHaveCount(ids.length);
-  await expect(ask.getByText("Or type your own question in the chat on the right.")).toBeVisible();
+  await expect(ask.getByText("Or ask the chat on the right to put your own question to NV-Reason-CT.")).toBeVisible();
   await expect(ask.locator(`.rchip[data-query="${q.id}"]`)).not.toContainText("Answer only Yes or No");
 
   await ask.locator(`.rchip[data-query="${q.id}"]`).click();
@@ -114,7 +120,6 @@ test("readers tab: reports and questions are visible on open, a question is answ
   await expect(asked.locator(".rqa")).toContainText("NV: Yes.", { timeout: 30_000 });
   await expect(asked.locator(".rqa")).not.toContainText("Yes..");
   await expect(asked.getByText("NV's answer differs from its report")).toBeVisible();
-  await page.screenshot({ path: "../.superpowers/sdd/2026-10-14-readers-lens/ux-asked.png" });
 
   // The same question in its row shows the same answer; the dot stays the report read.
   await readers.locator('.rrow[data-row="ascites"] .rexpand').click();

@@ -9,7 +9,7 @@ const YES_NO_SUFFIX = "Answer only Yes or No."; // mirrors the Python constant; 
 const shown = (text) => text.endsWith(YES_NO_SUFFIX) ? text.slice(0, -YES_NO_SUFFIX.length).trimEnd() : text;
 const HOLDS = { needs_modal: "needs Modal compute", budget: "over the monthly GPU budget", spawn_error: "could not start, trying again" };
 
-export function createReadersView({ root, onOrgan, onRetryReads, onRunNv, onAsk, onAddReport }) {
+export function createReadersView({ root, onOrgan, onRetryReads, onRunNv, onAsk, onAddReport, onThreshold }) {
   const state = { view: null, threshold: 50, open: new Set(), foldOpen: false, othersOpen: false, error: null, asking: new Set(), askError: null, detailsOpen: new Set(), reportOpen: false };
 
   // No Report column without a report, no NV column when NV cannot run and never did.
@@ -93,13 +93,13 @@ export function createReadersView({ root, onOrgan, onRetryReads, onRunNv, onAsk,
     return el("div", { class: "rq", "data-q": q.id }, el("button", { type: "button", class: "rchip", "data-query": q.id, disabled: inFlight, title: "Ask NV-Reason-CT this question", onclick: (e) => (e.stopPropagation(), ask(q)) }, shown(q.text)), ...under);
   }
 
-  function askSection(view) {
+  function askSection(view, noChat) {
     const items = allQuestions(view);
     return section(
       "Ask NV-Reason-CT",
       items.length ? el("div", { class: "rqs" }, items.map(question)) : el("p", { class: "muted" }, noQuestionsText(view)),
       state.askError ? el("p", { class: "rretry" }, state.askError) : null,
-      el("p", { class: "muted small" }, "Or type your own question in the chat on the right."),
+      noChat ? null : el("p", { class: "muted small" }, "Or ask the chat on the right to put your own question to NV-Reason-CT."),
     );
   }
 
@@ -196,29 +196,42 @@ export function createReadersView({ root, onOrgan, onRetryReads, onRunNv, onAsk,
     return el("p", { class: "rkey muted small" }, [...items, el("span", {}, "⚑ disagree")]);
   }
 
-  function render() {
-    if (state.error) return root.replaceChildren(el("p", { class: "muted" }, state.error));
+  // The display line and the table live in nodes that outlive a render, so dragging the slider is never interrupted.
+  const lineOut = el("output", {}, "50%");
+  const lineInput = el("input", { type: "range", min: "0", max: "100", step: "1", value: "50", "aria-label": "Display line", oninput: () => onThreshold?.(Number(lineInput.value)) });
+  const line = el("div", { class: "rline" }, el("label", {}, "Display line ", lineOut), lineInput, el("p", { class: "muted small" }, "RADAR ships no calibrated thresholds; this line is for display. A score is not urgency."));
+  const table = el("div", { class: "rtable" });
+
+  function renderTable() {
     const view = state.view;
-    if (!view) return root.replaceChildren(el("p", { class: "muted" }, "Loading the readers…"));
+    lineInput.value = String(state.threshold);
+    lineOut.textContent = `${state.threshold}%`;
+    if (!view) return;
     const { flagged, positive, waiting, folded } = arrange(view.rows, {
       threshold: state.threshold,
       nvPending: nvPendingOf(view),
       reportPending: view.has_report && view.report.status === "pending",
     });
+    table.replaceChildren(header(), ...[...flagged, ...positive, ...waiting].flatMap(rowNodes), ...fold(folded), ...others(view), legend());
+  }
+
+  function render() {
+    if (state.error) return root.replaceChildren(el("p", { class: "muted" }, state.error));
+    const view = state.view;
+    if (!view) return root.replaceChildren(el("p", { class: "muted" }, "Loading the readers…"));
+    const noChat = [view.report?.status, view.nv?.read?.status, view.queries?.status].includes("no_llm");
     const parts = [
       el("p", { class: "rintro muted" }, "Three readers of the same scan: the radiologist's report, RADAR's scores and NV-Reason-CT's own report. Nothing here says who is right."),
       section("Reports", el("div", { class: "rcards" }, radiologistCard(view), nvCard(view))),
-      askSection(view),
+      askSection(view, noChat),
       section(
         "Compare the readers",
         el("p", { class: "muted small" }, "Each row is a finding. ● says present, ○ says absent. ⚑ marks rows where the readers disagree. Click a row to see each reader's own words."),
-        header(),
-        ...[...flagged, ...positive, ...waiting].flatMap(rowNodes),
-        ...fold(folded),
-        ...others(view),
-        legend(),
+        line,
+        table,
       ),
     ];
+    renderTable();
     root.replaceChildren(...parts.filter(Boolean));
     root.dataset.ready = "true";
   }
@@ -236,7 +249,7 @@ export function createReadersView({ root, onOrgan, onRetryReads, onRunNv, onAsk,
     },
     setThreshold(percent) {
       state.threshold = percent;
-      if (state.view) render();
+      renderTable();
     },
     get view() {
       return state.view;

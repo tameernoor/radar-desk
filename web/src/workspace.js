@@ -526,12 +526,12 @@ async function retryReads() {
   loadReaders();
 }
 
-// The Readers tab hides RADAR's list and its controls; the display line stays, since the dots follow it.
+// The Readers tab hides RADAR's list and its controls; it has its own display line, kept in step through findings.
 function showTab(name) {
   const readers = name === "readers";
   $("tab-findings").setAttribute("aria-selected", String(!readers));
   $("tab-readers").setAttribute("aria-selected", String(readers));
-  for (const node of [$("organ-strip"), $("findings"), ...document.querySelectorAll(".strip-key, .findings-controls")]) node.hidden = readers;
+  for (const node of [$("organ-strip"), $("findings"), ...document.querySelectorAll(".strip-key, .findings-controls, .threshold")]) node.hidden = readers;
   $("readers").hidden = !readers;
   if (readers) loadReaders();
 }
@@ -662,14 +662,6 @@ function askChat() {
   toggleFocus(false); // the chat is hidden in focus mode
   ws.chat.open();
   if (!ws.chat.submitMessage(LOOK_QUESTION)) notice("The chat could not send right now; try again.");
-}
-
-// A general prepared question goes to the chat, which asks NV-Reason-CT through its tool and quotes the answer.
-function askNvInChat(text) {
-  if (!ws.chat) return notice("The chat is not available.");
-  toggleFocus(false);
-  ws.chat.open();
-  if (!ws.chat.submitMessage(`Ask NV-Reason-CT: ${text}`)) notice("The chat could not send right now; try again.");
 }
 
 // ---------- wiring ----------
@@ -817,8 +809,8 @@ async function main() {
       await post(`/scans/${encodeURIComponent(ws.scan.id)}/nvreason/ask`, { query_id: queryId });
       await loadReaders();
     },
-    onAskChat: askNvInChat,
     onAddReport: () => ws.report?.open(),
+    onThreshold: (percent) => ws.findings.setThreshold(percent),
   });
   ws.findings.setCatalog(catalog.findings, labels.scored_organs);
   ws.catalog = catalog.findings;

@@ -101,6 +101,11 @@ test("splitReport takes the text after IMPRESSION:", async () => {
   const { splitReport } = await import("../src/readers.js");
   expect(splitReport("FINDINGS:\nLiver: ok.\n\nIMPRESSION:\n1. A.\n2. B.")).toEqual({ findings: "FINDINGS:\nLiver: ok.", impression: "1. A.\n2. B." });
   expect(splitReport("Just text.")).toEqual({ findings: "", impression: "Just text." });
+  expect(splitReport("Findings.\nImpression:\n1. A.")).toEqual({ findings: "Findings.", impression: "1. A." });
+  expect(splitReport("Findings.\nIMPRESSIONS:\n1. A.").impression).toBe("1. A.");
+  expect(splitReport("Findings.\n**IMPRESSION:**\n1. A.")).toEqual({ findings: "Findings.", impression: "1. A." });
+  expect(splitReport("Findings.\n**IMPRESSION**: 1. A.").impression).toBe("1. A.");
+  expect(splitReport("A cyst giving the impression of a mass.")).toEqual({ findings: "", impression: "A cyst giving the impression of a mass." });
   expect(splitReport(null)).toEqual({ findings: "", impression: "" });
 });
 

@@ -78,9 +78,9 @@ export function isBusy(view) {
 // NV's report text split at its IMPRESSION: heading. With no heading the whole text is the impression.
 export function splitReport(answer) {
   const text = String(answer ?? "").trim();
-  const m = /IMPRESSION:?/i.exec(text);
+  const m = /^[\s*#]*IMPRESSIONS?\**\s*:\**/im.exec(text);
   if (!m) return { findings: "", impression: text };
-  return { findings: text.slice(0, m.index).trim(), impression: text.slice(m.index + m[0].length).trim() };
+  return { findings: text.slice(0, m.index).trim(), impression: text.slice(m.index + m[0].length).replace(/^[\s*#]+/, "").trim() };
 }
 
 // Every prepared question once, general ones first, then each row's, de-duplicated by id.
