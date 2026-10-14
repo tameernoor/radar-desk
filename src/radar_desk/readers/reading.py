@@ -106,11 +106,16 @@ _BANNED = [
     (re.compile(r"\breports?\b|\breported\b", re.IGNORECASE), "mentions a report"),
     (re.compile(r"\bradiologists?\b", re.IGNORECASE), "mentions the radiologist"),
     (re.compile(r"\bradar\b", re.IGNORECASE), "mentions RADAR"),
-    (re.compile(r"\bscor(?:e|es|ed|ing)\b", re.IGNORECASE), "mentions a score"),
+    (re.compile(r"\b(?:another|other|second)\s+(?:reader|observer|model|opinion)\b|\bsomeone\b"
+                r"|\b(?:doctor|clinician|physician|ai|algorithm)\b|\bare you sure\b", re.IGNORECASE),
+     "hints at what another reader said"),
+    (re.compile(r"\bscor(?:e|es|ed|ing)\b|\bprobabilit|\blikelihood\b|\bconfiden|\b0?\.\d+\b", re.IGNORECASE),
+     "mentions a score"),
     (re.compile(r"%|\bper ?cent", re.IGNORECASE), "mentions a percentage"),
-    (re.compile(r"\bmeasur|\bdiameter|\bdimensions?\b|\bhow (?:big|large)\b|\bsize\b|\d\s*(?:mm|cm)\b"
-                r"|\bmillimet|\bcentimet", re.IGNORECASE), "asks for a measurement"),
-    (re.compile(r"\bprior\b|\bprevious\b|\bearlier\b|\binterval\b|\bcompar", re.IGNORECASE),
+    (re.compile(r"\bmeasur|\bdiameter|\bdimensions?\b|\bhow (?:big|large)\b|\bwhat size\b|\bsize of\b"
+                r"|\d\s*(?:mm|cm)\b|\bmillimet|\bcentimet", re.IGNORECASE), "asks for a measurement"),
+    (re.compile(r"\bprior\b|\bprevious\b|\binterval\b|\bcompared (?:to|with) (?:the )?(?:prior|previous|earlier|last)"
+                r"|\bstable\b|\bnew\b|\bgrown\b|\bgrowth\b|\bsince\b|\bchanged?\b", re.IGNORECASE),
      "mentions a prior scan"),
 ]
 
@@ -136,6 +141,17 @@ ORGAN_WORDS = {
     "Sacrum": ("sacrum", "sacral"),
 }
 
+# Stems of derived terms (hepatic, nephropathy, pneumonia ...), mapped to the organ names the coverage uses.
+ORGAN_STEMS = {
+    "Liver": ("hepat",),
+    "Spleen": ("splen",),
+    "Kidney": ("nephr", "hydroneph"),
+    "Lung": ("pneum", "atelecta"),
+    "Gallbladder": ("cholecyst",),
+    "Heart": ("pericardi",),
+    "Rib": ("costal",),
+}
+
 
 def validate_query(q: Any, label_organs: dict[str, str | None], outside: list[str]) -> str | None:
     """Why this prepared question breaks NV-Reason-CT's limits, or None when it keeps to them."""
@@ -149,7 +165,7 @@ def validate_query(q: Any, label_organs: dict[str, str | None], outside: list[st
         return f"longer than {MAX_QUERY_CHARS} characters"
     if kind not in KINDS:
         return f"unknown kind {kind!r}"
-    if label is not None and label not in label_organs:
+    if label is not None and (not isinstance(label, str) or label not in label_organs):
         return f"unknown label {label!r}"
     if kind == "yes_no" and not text.endswith(YES_NO_SUFFIX):
         return f'a yes_no question must end with "{YES_NO_SUFFIX}"'
@@ -161,6 +177,9 @@ def validate_query(q: Any, label_organs: dict[str, str | None], outside: list[st
     for organ in outside:
         for word in ORGAN_WORDS.get(organ, (organ.lower(),)):
             if re.search(rf"\b{re.escape(word)}\b", text, re.IGNORECASE):
+                return f"names {organ}, mostly outside the cube"
+        for stem in ORGAN_STEMS.get(organ, ()):
+            if re.search(rf"\b{re.escape(stem)}\w*", text, re.IGNORECASE):
                 return f"names {organ}, mostly outside the cube"
     return None
 

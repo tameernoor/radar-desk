@@ -93,7 +93,7 @@ def test_rejected_queries_are_asked_again_once_then_dropped():
     assert system["content"] == QUERY_SYSTEM
     assert "28.0 mm at the bottom and 116.0 mm at the top" in user["content"]
     assert "Organs mostly outside the cube (never ask about them): Lung." in user["content"]
-    assert "Disputed rows (1 or 2 questions each): ascites." in user["content"]
+    assert "Rows to ask about directly (1 or 2 questions each): ascites." in user["content"]
     assert "Liver: A small hypodense lesion." in user["content"]
 
 
@@ -172,3 +172,31 @@ def test_a_query_failure_leaves_no_chips_and_nothing_else_changes(readers_world)
     assert view["queries"]["status"] == "failed" and view["queries"]["general"] == []
     assert all(r["queries"] == [] for r in view["rows"])
     assert view["nv"]["read"]["status"] == "ready"
+
+
+@pytest.mark.parametrize("text", [
+    "Another reader saw ascites. Is there ascites?" + YN,
+    "Are you sure there is no free fluid?" + YN,
+    "Is the cyst stable?" + YN,
+    "Is this a new lesion?" + YN,
+    "Is ascites likely, at a probability of 0.7?" + YN,
+])
+def test_neutrality_leaks_are_rejected(text):
+    assert validate_query({"label": "ascites", "kind": "yes_no", "text": text}, ORGANS, []) is not None
+
+
+@pytest.mark.parametrize("text", [
+    "Is the lesion hypodense compared with the surrounding liver?" + YN,
+    "Is the lesion enhancing in the arterial phase versus the earlier portal phase?" + YN,
+    "Is the spleen normal in size?" + YN,
+])
+def test_legitimate_questions_are_accepted(text):
+    assert validate_query({"label": None, "kind": "yes_no", "text": text}, ORGANS, []) is None
+
+
+def test_derived_organ_terms_and_odd_labels():
+    q = {"label": None, "kind": "finding", "text": "Is there pneumonia at the bases?"}
+    assert validate_query(q, ORGANS, ["Lung"]) == "names Lung, mostly outside the cube"
+    assert validate_query(q, ORGANS, []) is None
+    for label in (["ascites"], {"a": 1}):
+        assert validate_query({"label": label, "kind": "finding", "text": "x"}, ORGANS, []).startswith("unknown label")

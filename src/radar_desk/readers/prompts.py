@@ -64,7 +64,7 @@ Every question is a follow-up in one conversation that starts with its own repor
 Wording: neutral. A question never mentions a report, a radiologist, RADAR, a score, a percentage, a measurement or a prior scan, and never hints at what anyone else found.
 
 Write:
-- for each disputed row in the message, 1 or 2 questions that go straight at that finding, usually yes_no;
+- for each row to ask about directly in the message, 1 or 2 questions that go straight at that finding, usually yes_no;
 - for findings in NV-Reason-CT's report, a follow_up or a differential where a radiologist would ask one;
 - 2 or 3 general questions with label null, such as a reasoning analysis or the differential for the main finding.
 
@@ -82,7 +82,7 @@ QUERY_USER_TEMPLATE = (
     "Labels:\n{labels}\n\n"
     "On this scan the cube cut off {below} mm at the bottom and {above} mm at the top.\n\n"
     "Organs mostly outside the cube (never ask about them): {outside}.\n\n"
-    "Disputed rows (1 or 2 questions each): {disputed}.\n\n"
+    "Rows to ask about directly (1 or 2 questions each): {disputed}.\n\n"
     "Rows NV-Reason-CT reports as present: {findings}.\n\n"
     "NV-Reason-CT's report:\n<<<\n{text}\n>>>"
 )
