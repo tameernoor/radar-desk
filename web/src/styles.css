@@ -296,7 +296,10 @@ body.focus .viewer-notice:not(.viewer-prompt) { top: calc(var(--toolbar-h, 2.5re
 .rflag { color: var(--warn); }
 .rcell { text-align: center; font-size: 1.05em; line-height: 1; color: var(--muted); }
 .rcell[data-state="present"], .rcell[data-state="absent"] { color: var(--text); }
-.rcell[data-state="outside"], .rcell[data-state="not_scored"] { font-size: 1.5em; }
+.rcell[data-state="outside"], .rcell[data-state="not_scored"] { font-size: 0; } /* glyph stays in the DOM and title for text/screen readers */
+.rcell[data-state="outside"]::before, .rcell[data-state="not_scored"]::before { content: ""; display: inline-block; box-sizing: border-box; width: 0.7rem; height: 0.7rem; border-radius: 50%; vertical-align: middle; }
+.rcell[data-state="outside"]::before { border: 2px dotted var(--muted); }
+.rcell[data-state="not_scored"]::before { width: 0.4rem; height: 0.4rem; background: var(--muted); }
 .rexpand { background: none; border: none; color: var(--muted); padding: 0; }
 .rdetails { padding: 0.3rem 0.4rem 0.5rem 2.6em; font-size: 0.85rem; }
 .rdetails p { margin: 0.15rem 0; }

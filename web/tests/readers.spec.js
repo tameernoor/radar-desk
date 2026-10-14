@@ -67,7 +67,7 @@ test("readers tab: rows, flags, fold, display line, words, jump, NV's view", asy
   expect(await page.evaluate(() => window.__radar.viewState().nv_view)).toBe(true);
 
   // Legend items are separate, and the NV column and button exist because the seeded NV job is done.
-  await expect(readers.locator(".rkey span")).toHaveCount(6);
+  await expect(readers.locator(".rkey > span")).toHaveCount(6);
   await expect(readers.locator('.rrow [data-reader="nv"]').first()).toBeVisible();
 
   // Back to RADAR's list.

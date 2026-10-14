@@ -68,11 +68,12 @@ export function createReadersView({ root, onOrgan, onRetryReads, onRunNv }) {
     if (state.view.has_report) parts.push(words("Report", row.report, "not read yet"));
     const scores = row.radar.findings.filter((f) => f.prob != null);
     parts.push(el("p", {}, el("strong", {}, "RADAR: "), scores.length ? scores.map((f) => `${f.finding} (${f.organ}) ${pct(f.prob)}`).join(", ") : "no RADAR score for this row"));
-    parts.push(words("NV-Reason-CT", row.nv, "not read yet"));
-    if (row.nv?.in_view === false) parts.push(el("p", { class: "muted small" }, `Only ${Math.round(row.nv.coverage * 100)}% of the ${row.organ.toLowerCase()} is inside NV's view.`));
+    const nvShown = readers().includes("nv");
+    if (nvShown) parts.push(words("NV-Reason-CT", row.nv, "not read yet"));
+    if (nvShown && row.nv?.in_view === false) parts.push(el("p", { class: "muted small" }, `Only ${Math.round(row.nv.coverage * 100)}% of the ${row.organ.toLowerCase()} is inside NV's view.`));
     for (const a of row.asked) {
       parts.push(
-        el("p", { class: "rasked" }, el("strong", {}, "Asked NV: "), a.question, el("br"), `NV: ${a.answer ?? "no answer"}`, a.differs ? el("span", { class: "rdiffers" }, " NV's answer differs from its report") : null),
+        el("p", { class: "rasked" }, el("strong", {}, "Asked NV: "), a.question, el("br"), `NV: ${a.answer ?? "no answer"}`, a.differs ? el("span", { class: "rdiffers" }, ". NV's answer differs from its report") : null),
       );
     }
     return el("div", { class: "rdetails" }, parts);
@@ -118,7 +119,9 @@ export function createReadersView({ root, onOrgan, onRetryReads, onRunNv }) {
   }
 
   function legend() {
-    return el("p", { class: "rkey muted small" }, [...KEY.map((s) => `${SYMBOL[s]} ${STATE_TEXT[s]}`), "⚑ disagree"].map((t) => el("span", {}, t)));
+    const states = KEY.filter((s) => s !== "outside" || readers().includes("nv"));
+    const items = states.map((s) => el("span", {}, el("span", { class: "rcell", "data-state": s }, SYMBOL[s]), ` ${STATE_TEXT[s]}`));
+    return el("p", { class: "rkey muted small" }, [...items, el("span", {}, "⚑ disagree")]);
   }
 
   function render() {
