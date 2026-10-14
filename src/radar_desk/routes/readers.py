@@ -21,3 +21,9 @@ def refresh_readers(scan_id: str, svc: Svc) -> dict:
     svc.scans.get(scan_id)
     started = svc.readers.kick(scan_id, force=True)
     return {"started": started, **svc.readers.status(scan_id)}
+
+
+@router.get("/{scan_id}/readers")
+def get_readers(scan_id: str, svc: Svc) -> dict:
+    """The Readers tab: one row per label with the report, RADAR and NV-Reason-CT side by side."""
+    return svc.readers.view(scan_id)
