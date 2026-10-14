@@ -43,6 +43,7 @@ def inputs_hash(inputs: dict) -> str:
     return sha(json.dumps(inputs, sort_keys=True, ensure_ascii=False))
 
 
+SLAB = 8  # slices of the mask read at a time by organ_coverage
 IN_VIEW = 0.5  # NV counts as seeing an organ when at least half its RADAR-mask voxels lie inside the crop box
 
 
@@ -51,14 +52,22 @@ def organ_coverage(mask_bytes: bytes, box_mm: list[list[float]]) -> dict[str, fl
     affine. The same computation as organ_coverage in scripts/nvreason_smoke.py."""
     raw = gzip.decompress(mask_bytes) if mask_bytes[:2] == b"\x1f\x8b" else mask_bytes
     img = nib.Nifti1Image.from_bytes(raw)
-    labels = np.asarray(img.dataobj).astype(np.int16)
-    idx = np.nonzero(labels)
-    lab = labels[idx]
-    world = img.affine[:3, :3] @ np.vstack(idx).astype(np.float64) + img.affine[:3, 3:4]
     lo, hi = np.asarray(box_mm[0], dtype=float)[:, None], np.asarray(box_mm[1], dtype=float)[:, None]
-    inside = np.all((world >= lo) & (world <= hi), axis=0)
-    total = np.bincount(lab, minlength=256)
-    kept = np.bincount(lab[inside], minlength=256)
+    total = np.zeros(256, dtype=np.int64)
+    kept = np.zeros(256, dtype=np.int64)
+    depth = img.shape[2]
+    for z0 in range(0, depth, SLAB):  # slabs along the last axis keep the working set small
+        slab = np.asarray(img.dataobj[:, :, z0:z0 + SLAB]).astype(np.int16)
+        idx = np.nonzero(slab)
+        if not idx[0].size:
+            continue
+        lab = slab[idx]
+        vox = np.vstack(idx).astype(np.float64)
+        vox[2] += z0
+        world = img.affine[:3, :3] @ vox + img.affine[:3, 3:4]
+        inside = np.all((world >= lo) & (world <= hi), axis=0)
+        total += np.bincount(lab, minlength=256)
+        kept += np.bincount(lab[inside], minlength=256)
     return {o["organ"]: round(float(kept[o["label"]] / total[o["label"]]), 3)
             for o in catalog.SCORED_ORGANS if total[o["label"]]}
 
@@ -84,13 +93,12 @@ def build_rows(labels: list[dict], report_read: dict | None, nv_read: dict | Non
     """One row per label: each reader's state and words, RADAR's best score over the row's keys (the client puts it
     against the display line), NV's coverage of the row's organ, and the answers asked for this row."""
     findings = {f.key: f for f in result.findings} if result is not None else {}
-    not_found = set(result.organs_not_found) if result is not None else set()
     rows = []
     for lab in labels:
         rid, organ = lab["id"], lab["organ"]
         hits = [findings[k] for k in lab["radar_keys"] if k in findings]
         probs = [f.prob for f in hits if f.prob is not None]
-        scored = bool(probs) and (organ is None or organ not in not_found)
+        scored = bool(probs)
         nv_cell = (nv_read or {}).get("labels", {}).get(rid) if nv_read else None
         cov = coverage.get(organ) if (coverage is not None and organ) else None
         rows.append({
@@ -138,6 +146,7 @@ class ReadersService:
         self._rerun: dict[str, bool] = {}  # scans to refresh again once the running one ends, with force
         self._deleted: set[str] = set()
         self._lock = threading.Lock()
+        self._cov_lock = threading.Lock()
         self._coverage: dict[tuple[str, str], dict[str, float]] = {}
 
     # What each output reads, and what is stored
@@ -281,14 +290,19 @@ class ReadersService:
         if result is None or nv_job is None or not crop or not result.artefacts.mask:
             return None
         key = (result.artefacts.mask, nv_job.id)
-        if key not in self._coverage:
-            data = read_bytes(self.storage, result.artefacts.mask)
-            if data is None:
-                return None
-            self._coverage[key] = organ_coverage(data, crop["box_mm"])
-            while len(self._coverage) > 32:
-                self._coverage.pop(next(iter(self._coverage)))
-        return self._coverage[key]
+        with self._cov_lock:  # one computation per key even when polls arrive together
+            if key not in self._coverage:
+                data = read_bytes(self.storage, result.artefacts.mask)
+                if data is None:
+                    return None
+                try:
+                    self._coverage[key] = organ_coverage(data, crop["box_mm"])
+                except Exception as exc:  # noqa: BLE001 - a bad mask must not fail the whole view
+                    log.warning("readers: coverage from mask %s failed: %s", key[0], exc)
+                    return None
+                while len(self._coverage) > 32:
+                    self._coverage.pop(next(iter(self._coverage)))
+            return self._coverage[key]
 
     def context(self, scan_id: str, plan: dict) -> dict:
         """Everything the rows are built from, and the rows."""

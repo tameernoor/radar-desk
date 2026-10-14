@@ -126,3 +126,48 @@ def test_readers_route(readers_world):
     assert r.status_code == 200, r.text
     assert r.json()["scan_id"] == w.scan.id and len(r.json()["rows"]) == 22
     assert client.get("/scans/scan_missing/readers").status_code == 404
+
+
+def test_slabbed_coverage_equals_a_one_shot_computation():
+    rng = np.random.default_rng(3)
+    labels = rng.integers(0, 4, size=(9, 7, 37)).astype(np.uint8)  # spans five slabs of 8
+    for organ in ("Liver", "Lung", "Kidney"):
+        labels[labels == 3] = catalog.label_for_organ(organ)
+    labels[labels == 1] = catalog.label_for_organ("Liver")
+    labels[labels == 2] = catalog.label_for_organ("Lung")
+    aff = affine_for((2.0, 3.0, 1.5), "LAS")
+    box = [[-10.0, 2.0, 5.0], [3.0, 15.0, 40.0]]
+    idx = np.nonzero(labels)
+    lab = labels[idx]
+    world = aff[:3, :3] @ np.vstack(idx).astype(float) + aff[:3, 3:4]
+    inside = np.all((world >= np.array(box[0])[:, None]) & (world <= np.array(box[1])[:, None]), axis=0)
+    expected = {o["organ"]: round(float((inside & (lab == o["label"])).sum() / (lab == o["label"]).sum()), 3)
+                for o in catalog.SCORED_ORGANS if (lab == o["label"]).any()}
+    got = organ_coverage(nib.Nifti1Image(labels, aff).to_bytes(), box)
+    assert got == expected and len(got) >= 2
+
+
+def test_a_row_scores_from_its_other_organ_when_its_primary_organ_is_not_found():
+    data = canned_result("job_r")
+    for f in data["findings"]:
+        f["prob"] = None
+    by_key = {f["key"]: f for f in data["findings"]}
+    by_key["小肠_梗阻"]["prob"] = None
+    by_key["十二指肠_梗阻"]["prob"] = 0.6
+    result = Result(job_id="job_r", findings=data["findings"], organs_not_found=["Small bowel"])
+    row = {r["id"]: r for r in build_rows(LABELS, None, None, result, None, [])}["sb_obstruction"]
+    assert row["radar"]["scored"] is True and row["radar"]["max_prob"] == 0.6
+
+
+def test_a_corrupt_mask_leaves_coverage_empty_instead_of_failing(readers_world):
+    w = readers_world([REPORT_READ, NV_READ])
+    w.svc.scans.put_report(w.scan.id, SYNTHETIC_REPORT)
+    w.svc.jobs.create(w.scan.id)
+    for _ in range(3):
+        w.poller.tick()
+    result = w.svc.readers.context(w.scan.id, w.svc.readers.plan(w.scan.id))["result"]
+    w.svc.storage.put_bytes(result.artefacts.mask, b"not a nifti")
+    w.svc.readers._coverage.clear()
+    view = w.svc.readers.view(w.scan.id)
+    assert view["radar"]["coverage"] is False
+    assert all(r["nv"]["coverage"] is None for r in view["rows"] if r["nv"])
