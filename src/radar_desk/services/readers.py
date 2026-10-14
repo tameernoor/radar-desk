@@ -22,7 +22,7 @@ import numpy as np
 from radar_desk.radar import catalog
 from radar_desk.readers.labels import LABELS, LABELS_SHA256
 from radar_desk.readers.prompts import QUERY_PROMPT_SHA, READ_PROMPT_SHA
-from radar_desk.readers.reading import norm, read_text, write_queries
+from radar_desk.readers.reading import leak_reason, norm, read_text, write_queries
 from radar_desk.records import now_iso
 from radar_desk.services.blobs import read_bytes, read_json, write_json
 from radar_desk.services.errors import ServiceError
@@ -439,4 +439,7 @@ class ReadersService:
         if not question or not question.strip():
             raise ServiceError(422, "give a question or a query_id")
         label = next((q["label"] for q in prepared if norm(q["text"]) == norm(question)), None)
+        why = leak_reason(question)
+        if why:
+            raise ServiceError(422, f"not asked, the question {why}; rephrase it as a question about the scan only")
         return self.nvreason.ask(scan_id, question, label=label)

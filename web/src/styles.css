@@ -284,7 +284,7 @@ body.focus .viewer-notice:not(.viewer-prompt) { top: calc(var(--toolbar-h, 2.5re
 .pane-tabs { display: flex; gap: 0.25rem; padding: 0.35rem 0.6rem 0; border-bottom: 1px solid var(--line); }
 .pane-tabs button { background: none; border: none; border-bottom: 2px solid transparent; color: var(--muted); padding: 0.3rem 0.5rem; }
 .pane-tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
-.readers { flex: 1; min-height: 0; overflow: auto; padding: 0.3rem 0.6rem 0.6rem; }
+.readers { flex: 1; min-height: 0; overflow: auto; padding: 0.3rem 0.6rem 0; }
 .rintro { margin: 0.2rem 0 0.4rem; }
 .rhead, .rrow { display: grid; grid-template-columns: 1.4em 1.2em 1fr repeat(var(--cols), 3.4em); align-items: center; gap: 0.2rem; }
 .rhead { font-size: 0.8rem; color: var(--muted); padding: 0.2rem 0; border-bottom: 1px solid var(--line); }
@@ -306,7 +306,7 @@ body.focus .viewer-notice:not(.viewer-prompt) { top: calc(var(--toolbar-h, 2.5re
 .rdiffers { color: var(--warn); }
 .rfold { display: block; background: none; border: none; color: var(--muted); padding: 0.35rem 0; text-align: left; }
 .rothers { margin: 0 0 0.4rem 1.2em; padding: 0; font-size: 0.85rem; }
-.rkey { position: sticky; bottom: 0; background: var(--panel); margin: 0; padding: 0.3rem 0; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 0.15rem 0.8rem; }
+.rkey { position: sticky; bottom: 0; background: var(--panel); margin: 0; padding: 0.3rem 0 0.6rem; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 0.15rem 0.8rem; }
 .rkey span { white-space: nowrap; }
 .rretry { color: var(--warn); }
 

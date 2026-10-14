@@ -17,7 +17,7 @@ from typing import Any
 from radar_desk.chat.llm import LLM, Done, LlmError, OpenAICompatibleLLM, TextDelta, ToolCall
 from radar_desk.chat.prompt import system_prompt
 from radar_desk.chat.providers import StatusCache, llm_configured, provider_spec, unconfigured_message
-from radar_desk.chat.tools import TOOLS, ToolSpec, is_error, openai_tools, run_tool
+from radar_desk.chat.tools import TOOLS, ToolSpec, active_tools, is_error, openai_tools, run_tool
 from radar_desk.chat.wire import Emitter
 from radar_desk.records import ChatExecution, new_id
 
@@ -218,7 +218,8 @@ class ChatAgent:
             page_names = {
                 t["name"] for t in ex.client_tools if isinstance(t.get("name"), str)
             } - self._server_names
-            tool_specs = openai_tools(self.tools) + _client_tool_specs(ex.client_tools, self._server_names)
+            offered = active_tools(self.services, self.tools)
+            tool_specs = openai_tools(offered) + _client_tool_specs(ex.client_tools, self._server_names)
             while True:
                 if _llm_calls_so_far(messages) >= self.max_llm_calls:
                     yield emitter.text_delta(CAP_TEXT)
@@ -258,7 +259,7 @@ class ChatAgent:
                         yield emitter.text_delta(note + "\n\n")
                     yield emitter.tool_start(call.id, call.name, call.arguments)
                     task = asyncio.ensure_future(asyncio.to_thread(
-                        run_tool, self.services, call.name, call.arguments, self.tools
+                        run_tool, self.services, call.name, call.arguments, offered
                     ))
                     while not task.done():
                         await asyncio.wait({task}, timeout=self.keepalive_s)

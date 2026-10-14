@@ -147,7 +147,7 @@
   </div>
   <dialog id="report-dialog" class="report-dialog" aria-labelledby="report-title">
     <h2 id="report-title">Radiologist report</h2>
-    <p class="muted small">Paste the report text or choose a .txt file. The Readers tab compares it with RADAR and NV-Reason-CT.</p>
+    <p class="muted small">Paste the report text or choose a .txt file. The Readers tab compares it with RADAR and NV-Reason-CT. The chat model reads the report to fill the Report column, so that column needs a chat model to be set up.</p>
     <textarea id="report-text" rows="14" spellcheck="false"></textarea>
     <label class="inline">Or choose a file <input type="file" id="report-file" accept=".txt,text/plain"></label>
     <p class="report-error" id="report-error" role="alert"></p>

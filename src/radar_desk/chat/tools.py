@@ -24,6 +24,12 @@ class ToolSpec:
     parameters: dict
     run: Callable[[Any, dict], dict]
     notice: Callable[[Any, dict], str | None] | None = None  # a chat line shown before the tool runs
+    enabled: Callable[[Any], bool] | None = None  # offered to the model only while this is true; None = always
+
+
+def active_tools(services: Any, specs: list[ToolSpec]) -> list[ToolSpec]:
+    """The specs the model is offered now."""
+    return [t for t in specs if t.enabled is None or t.enabled(services)]
 
 
 def _schema(properties: dict | None = None, required: tuple[str, ...] = ()) -> dict:
@@ -176,6 +182,10 @@ def ask_nv_reason(services: Any, args: dict) -> dict:
     return services.readers.ask(args["scan_id"], question=args["question"])
 
 
+def nv_available(services: Any) -> bool:
+    return services.nvreason.unavailable() is None
+
+
 def _nv_notice(services: Any, args: dict) -> str | None:
     scan_id = args.get("scan_id")
     return services.nvreason.cold_start_notice(scan_id) if isinstance(scan_id, str) else None
@@ -271,6 +281,7 @@ TOOLS: list[ToolSpec] = [
                 ("scan_id", "question")),
         ask_nv_reason,
         notice=_nv_notice,
+        enabled=nv_available,
     ),
 ]
 

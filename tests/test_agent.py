@@ -97,7 +97,7 @@ async def test_text_only_turn_golden_sequence(seeded):
     assert [m["role"] for m in ex.messages] == ["system", "user", "assistant"]
     assert ex.messages[-1]["content"] == "The liver scores are low."
     sent_tools = [t["function"]["name"] for t in llm.calls[0]["tools"]]
-    assert sent_tools == [t.name for t in TOOLS] + ["jump_to_organ", "set_window"]
+    assert sent_tools == [t.name for t in TOOLS if t.name != "ask_nv_reason"] + ["jump_to_organ", "set_window"]
     assert llm.calls[0]["tools"][-1]["function"]["parameters"] == {"type": "object", "properties": {}}
 
 

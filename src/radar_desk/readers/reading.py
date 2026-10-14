@@ -156,6 +156,15 @@ ORGAN_STEMS = {
 }
 
 
+def leak_reason(text: str) -> str | None:
+    """Why this question would reveal another reader or ask what NV-Reason-CT cannot answer, or None. The checks
+    shared by prepared questions and free ones (the organ-outside-the-cube check is for prepared ones only)."""
+    for pattern, why in _BANNED:
+        if pattern.search(text):
+            return why
+    return None
+
+
 def validate_query(q: Any, label_organs: dict[str, str | None], outside: list[str]) -> str | None:
     """Why this prepared question breaks NV-Reason-CT's limits, or None when it keeps to them."""
     if not isinstance(q, dict):
@@ -172,9 +181,9 @@ def validate_query(q: Any, label_organs: dict[str, str | None], outside: list[st
         return f"unknown label {label!r}"
     if kind == "yes_no" and not text.endswith(YES_NO_SUFFIX):
         return f'a yes_no question must end with "{YES_NO_SUFFIX}"'
-    for pattern, why in _BANNED:
-        if pattern.search(text):
-            return why
+    why = leak_reason(text)
+    if why:
+        return why
     if label is not None and label_organs[label] in outside:
         return f"asks about {label_organs[label]}, mostly outside the cube"
     for organ in outside:

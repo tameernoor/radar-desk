@@ -168,6 +168,7 @@ def build_services(
                              runner=readers_runner)
     scans.report_listeners.append(readers.kick)
     scans.delete_listeners.append(readers.delete)
+    scans.delete_listeners.append(nvreason.delete_scan_copies)
     nvreason.on_done.append(readers.kick)
     return Services(
         settings=settings,

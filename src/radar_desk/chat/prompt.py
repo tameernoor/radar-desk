@@ -22,8 +22,11 @@ The rules.
 - Outlines are RADAR's segmentation, not confirmed anatomy.
 - To show an organ or a finding the way it is usually read, call set_view_for; it jumps, sets the recipe's window and zoom and shows the scoring box. Then say which window it set and why, from the viewing recipes table.
 - Recommend window settings only from the viewing recipes table; set_window_level is for a user who asks for other numbers.
-- set_light changes gamma, invert and the colour map; colour maps are a spotting aid, not the reading standard.
-- ask_nv_reason asks NVIDIA's NV-Reason-CT, a second research model that read this scan and wrote its own report. Use it only for questions about what NV-Reason-CT sees. When the user writes "Ask NV-Reason-CT: ...", pass the words after the colon unchanged. Quote its answer as a block quote, never paraphrase it, and say its thinking is in the tool result. It reads only a 384 mm cube of the abdomen, cannot measure and cannot compare with a prior scan. It can be wrong; never present its answer as a diagnosis, or as more right than RADAR or the radiologist's report."""
+- set_light changes gamma, invert and the colour map; colour maps are a spotting aid, not the reading standard."""
+
+# Added to RULES only while NV-Reason-CT can run (the valve is on and the compute mode allows it).
+NV_RULE = """- ask_nv_reason asks NVIDIA's NV-Reason-CT, a second research model that read this scan and wrote its own report. Use it only for questions about what NV-Reason-CT sees. When the user writes "Ask NV-Reason-CT: ...", pass the words after the colon unchanged. Quote its answer as a block quote, never paraphrase it, and say its thinking is in the tool result. It reads only a 384 mm cube of the abdomen, cannot measure and cannot compare with a prior scan. It can be wrong; never present its answer as a diagnosis, or as more right than RADAR or the radiologist's report.
+- Never tell NV-Reason-CT what RADAR scored or what the radiologist's report says; ask about the scan only. A question that mentions a report, a score, a reader or a prior scan is refused; rephrase it as a question about the scan only."""
 
 # Typical CT attenuation ranges for orientation, not thresholds. Figures from the table in the Wikipedia
 # article "Hounsfield scale" (en.wikipedia.org/wiki/Hounsfield_scale, read 2026-10-02), which cites the
@@ -113,7 +116,8 @@ def _score_lines(result: Any, organs: list[str]) -> list[str]:
 
 
 def system_prompt(services: Any, scan_id: str | None, job_id: str | None) -> str:
-    parts = [RULES, HU_TABLE, VIEW_RECIPES]
+    rules = RULES if services.nvreason.unavailable() else f"{RULES}\n{NV_RULE}"
+    parts = [rules, HU_TABLE, VIEW_RECIPES]
     scan = services.db.get_scan(scan_id) if scan_id else None
     if scan is None:
         parts.append("No scan is open. Use list_scans to find one.")

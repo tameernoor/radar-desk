@@ -11,11 +11,11 @@ from api_client import api_client
 from radar_desk.chat.agent import ChatAgent
 from radar_desk.chat.llm import ToolCall
 from radar_desk.chat.prompt import system_prompt
-from radar_desk.chat.tools import TOOLS, ToolSpec, run_tool
+from radar_desk.chat.tools import TOOLS, ToolSpec, active_tools, run_tool
 from radar_desk.chat.wire import parse_frames
 from radar_desk.gpu.nvreason_backend import NvAskTimeout
 from radar_desk.services import ServiceError
-from radar_desk.services.nvreason import COLD_NOTICE, NV_REPORT_PROMPT, NV_SCALEDOWN_S, OFF
+from radar_desk.services.nvreason import COLD_NOTICE, NV_REPORT_PROMPT, NV_SCALEDOWN_S, OFF, nv_keys, qa_key
 from radar_desk.services.readers import _thread_runner
 from readers_seed import NV_READ, QUERIES
 from test_agent import FakeLLM, body, text_turn, tool_turn
@@ -172,10 +172,74 @@ async def test_the_agent_shows_the_notice_and_keeps_a_slow_tool_alive(readers_wo
     assert names[-1] == "execution_complete"
 
 
-def test_the_chat_rules_name_the_tool(make_services):
-    text = system_prompt(make_services(), None, None)
+def test_the_chat_rules_name_the_tool(readers_world):
+    w = readers_world(llm=False)
+    text = system_prompt(w.svc, None, None)
     assert "ask_nv_reason asks NVIDIA's NV-Reason-CT" in text
     assert "never paraphrase it" in text
+    assert "Never tell NV-Reason-CT what RADAR scored" in text
+
+
+def test_with_the_valve_off_the_chat_has_no_nv_tool_or_rule(make_services):
+    svc = make_services()
+    assert svc.nvreason.unavailable() is not None
+    text = system_prompt(svc, None, None)
+    assert "ask_nv_reason" not in text and "NV-Reason-CT" not in text
+    assert "ask_nv_reason" not in [t.name for t in active_tools(svc, TOOLS)]
+
+
+def test_with_the_valve_on_the_chat_offers_the_nv_tool(readers_world):
+    w = readers_world(llm=False)
+    assert "ask_nv_reason" in [t.name for t in active_tools(w.svc, TOOLS)]
+
+
+def test_a_leading_chat_question_is_refused_without_calling_the_backend(readers_world):
+    w = nv_done(readers_world)
+    for q in ("RADAR scored the liver at 80%. Is there a lesion in the liver?",
+              "The radiologist report says there is ascites. Do you agree?",
+              "Has the cyst grown since the prior scan?"):
+        out = run_tool(w.svc, "ask_nv_reason", {"scan_id": w.scan.id, "question": q})
+        assert out["error"]["class"] == "ServiceError" and "about the scan only" in out["error"]["message"]
+    assert w.nv.asks == []
+    assert w.svc.nvreason.qa_entries(w.svc.nvreason.latest_done(w.scan.id).id) == []
+
+
+def test_a_neutral_chat_question_goes_through_even_about_an_organ_outside_the_cube(readers_world):
+    w = nv_done(readers_world)
+    out = run_tool(w.svc, "ask_nv_reason", {"scan_id": w.scan.id, "question": "What do you see in the lungs?"})
+    assert "error" not in out and len(w.nv.asks) == 1
+
+
+def test_a_chip_question_still_goes_through_by_id(readers_world):
+    w = nv_done(readers_world)
+    out = w.svc.readers.ask(w.scan.id, query_id=_yes_no_query(w)["id"])
+    assert out["answer"] == "Yes." and len(w.nv.asks) == 1
+
+
+def test_scan_delete_removes_the_nv_crop_but_keeps_its_report(readers_world):
+    w = nv_done(readers_world)
+    job = w.svc.nvreason.latest_done(w.scan.id)
+    keys = nv_keys(job.id)
+    assert w.svc.storage.exists(keys["crop_nii"])
+    w.svc.scans.delete(w.scan.id)
+    assert not w.svc.storage.exists(keys["crop_nii"])
+    assert w.svc.storage.exists(keys["nv_report"])
+
+
+def test_an_answer_that_lands_after_the_scan_was_deleted_is_not_logged(readers_world):
+    w = nv_done(readers_world)
+    job = w.svc.nvreason.latest_done(w.scan.id)
+    real_ask = w.nv.ask
+
+    def ask_then_delete(*args):
+        out = real_ask(*args)
+        w.svc.db.delete_scan(w.scan.id)
+        return out
+
+    w.nv.ask = ask_then_delete
+    w.svc.nvreason.ask(w.scan.id, "Where is the fluid?")
+    assert w.svc.nvreason.qa_entries(job.id) == []
+    assert not w.svc.storage.exists(qa_key(job.id))
 
 
 def _yes_no_query(w):

@@ -287,6 +287,12 @@ class NvReasonService:
     def crop(self, job_id: str) -> dict | None:
         return read_json(self.storage, nv_keys(job_id)["crop"])
 
+    def delete_scan_copies(self, scan_id: str) -> None:
+        """A scan delete listener: remove the crop (a CT copy) of every NV job of the scan. The report and the
+        questions stay with the kept job artefacts, like RADAR's."""
+        for job in self.db.jobs_for_scan(scan_id, kind=NV_KIND):
+            self.storage.delete(nv_keys(job.id)["crop_nii"])
+
     def qa_entries(self, job_id: str) -> list[dict]:
         """The questions asked about this job's report, oldest first; unreadable lines are skipped."""
         data = read_bytes(self.storage, qa_key(job_id)) or b""
@@ -379,7 +385,10 @@ class NvReasonService:
             "label": label,
             "asked_at": iso_at(finished),
         }
-        self._append_qa(job.id, entry)
+        if self.db.get_scan(scan_id) is None:
+            log.info("nvreason: scan %s was deleted while a question ran; its answer is not kept", scan_id)
+        else:
+            self._append_qa(job.id, entry)
         return {**entry, "job_id": job.id}
 
     def _append_qa(self, job_id: str, entry: dict) -> None:
