@@ -71,7 +71,12 @@ def validate_read(data: dict, source: str, label_ids: list[str]) -> dict:
             quote = None
         out[lid] = {"state": state, "quote": quote}
     others: list[str] = []
-    for q in data.get("other_mentions") or []:
+    raw_others = data.get("other_mentions")
+    if raw_others is None:
+        raw_others = []
+    if not isinstance(raw_others, list) or not all(isinstance(q, str) for q in raw_others):
+        raise ReadError("other_mentions is not a list of strings")
+    for q in raw_others:
         if isinstance(q, str) and q.strip() and norm(q) in src and q.strip() not in others:
             others.append(q.strip())
     return {"labels": out, "other_mentions": others}
