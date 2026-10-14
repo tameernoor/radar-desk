@@ -112,3 +112,61 @@ def test_a_fake_nv_result_missing_optional_keys_still_reads(readers_world):
     from radar_desk.services.nvreason import nv_keys
     write_json(w.svc.storage, nv_keys(job.id)["nv_report"], {})
     assert w.svc.readers.plan(w.scan.id)["nv_read"]["status"] == "none"
+
+
+class HookLLM:
+    """Wraps the scripted model; the hook runs once, during the first call (a change landing mid-flight)."""
+
+    def __init__(self, inner, hook) -> None:
+        self.inner, self.hook = inner, hook
+
+    @property
+    def calls(self):
+        return self.inner.calls
+
+    async def stream_chat(self, messages, tools):
+        hook, self.hook = self.hook, None
+        if hook:
+            hook()
+        async for event in self.inner.stream_chat(messages, tools):
+            yield event
+
+
+def hooked(w, hook):
+    w.svc.readers.llm = HookLLM(w.llm, hook)
+
+
+def test_a_report_replaced_mid_flight_is_read_again(readers_world):
+    w = readers_world([REPORT_READ, REPORT_READ])
+    new = SYNTHETIC_REPORT + "\nAddendum: no change."
+    hooked(w, lambda: w.svc.scans.put_report(w.scan.id, new))
+    w.svc.scans.put_report(w.scan.id, SYNTHETIC_REPORT)
+    plan = w.svc.readers.plan(w.scan.id)
+    assert plan["report_read"]["status"] == "ready" and plan["report_read"]["text"] == new
+    assert w.svc.readers.status(w.scan.id)["report_read"]["status"] == "ready"
+    assert len(w.llm.calls) == 2
+
+
+def test_a_report_removed_mid_flight_leaves_no_read(readers_world):
+    w = readers_world([REPORT_READ])
+    hooked(w, lambda: w.svc.scans.delete_report(w.scan.id))
+    w.svc.scans.put_report(w.scan.id, SYNTHETIC_REPORT)
+    assert not w.svc.storage.exists(readers_key(w.scan.id, "report_read"))
+
+
+def test_a_scan_deleted_mid_flight_leaves_nothing(readers_world):
+    w = readers_world([REPORT_READ])
+    hooked(w, lambda: w.svc.scans.delete(w.scan.id))
+    w.svc.scans.put_report(w.scan.id, SYNTHETIC_REPORT)
+    for name in ("report_read", "nv_read", "queries"):
+        assert not w.svc.storage.exists(readers_key(w.scan.id, name))
+
+
+def test_a_retry_mid_flight_is_not_lost(readers_world):
+    w = readers_world(["bad", "bad"])
+    w.svc.scans.put_report(w.scan.id, SYNTHETIC_REPORT)
+    assert w.svc.readers.status(w.scan.id)["report_read"]["status"] == "failed"
+    w.llm.replies[:] = ["bad", "bad", REPORT_READ]
+    hooked(w, lambda: w.svc.readers.kick(w.scan.id, force=True))
+    assert w.svc.readers.kick(w.scan.id, force=True) is True
+    assert w.svc.readers.status(w.scan.id)["report_read"]["status"] == "ready"

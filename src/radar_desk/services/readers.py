@@ -52,6 +52,8 @@ class ReadersService:
         self.llm = llm  # the chat model client, or None without CHAT_MODEL
         self.runner = runner or _thread_runner
         self._running: set[str] = set()
+        self._rerun: dict[str, bool] = {}  # scans to refresh again once the running one ends, with force
+        self._deleted: set[str] = set()
         self._lock = threading.Lock()
 
     # What each output reads, and what is stored
@@ -109,6 +111,10 @@ class ReadersService:
     def kick(self, scan_id: str, force: bool = False) -> bool:
         """Start a background refresh when an output is stale, has lost its input, or (with force) failed.
         True when a refresh runs."""
+        with self._lock:
+            if scan_id in self._running:  # the running refresh goes round again, so no change is lost
+                self._rerun[scan_id] = self._rerun.get(scan_id, False) or force
+                return True
         plan = self.plan(scan_id)
         can_call = self.llm is not None
         due = any((can_call and s["status"] == "stale") or (can_call and force and s["status"] == "failed")
@@ -117,25 +123,41 @@ class ReadersService:
             return False
         with self._lock:
             if scan_id in self._running:
+                self._rerun[scan_id] = self._rerun.get(scan_id, False) or force
                 return True
             self._running.add(scan_id)
 
         def work() -> None:
-            try:
-                self.refresh(scan_id, force=force)
-            except Exception:
-                log.exception("readers: refresh of scan %s failed", scan_id)
-            finally:
+            go, run_force = True, force
+            while go:
+                try:
+                    self.refresh(scan_id, force=run_force)
+                except Exception:
+                    log.exception("readers: refresh of scan %s failed", scan_id)
                 with self._lock:
-                    self._running.discard(scan_id)
+                    go = scan_id in self._rerun
+                    if go:
+                        run_force = self._rerun.pop(scan_id)
+                    else:
+                        self._running.discard(scan_id)
 
         self.runner(work)
         return True
 
     def delete(self, scan_id: str) -> None:
-        """Remove every stored output of the scan (they quote the patient report). queries.json is Task 11's."""
-        for name in (*READS, "queries"):
-            self.storage.delete(readers_key(scan_id, name))
+        """Remove every stored output of the scan (they quote the patient report) and stop any in-flight refresh from
+        writing one back. Scan ids are never reused, so the tombstone stays for the process lifetime.
+        queries.json is Task 11's."""
+        with self._lock:
+            self._deleted.add(scan_id)
+            for name in (*READS, "queries"):
+                self.storage.delete(readers_key(scan_id, name))
+
+    def _store(self, scan_id: str, key: str, value: dict) -> None:
+        """Write an output unless the scan was deleted meanwhile."""
+        with self._lock:
+            if scan_id not in self._deleted:
+                write_json(self.storage, key, value)
 
     def refresh(self, scan_id: str, force: bool = False) -> None:
         """Bring each output up to date with its inputs, in order, synchronously."""
@@ -154,8 +176,8 @@ class ReadersService:
             return
         base = {"inputs": stage["inputs"], "input_hash": stage["hash"], "created_at": now_iso()}
         try:
-            write_json(self.storage, key, {**base, "state": "ready", **produce(stage)})
+            self._store(scan_id, key, {**base, "state": "ready", **produce(stage)})
         except Exception as exc:  # noqa: BLE001 - recorded; the tab offers a retry
             log.warning("readers: %s for scan %s failed: %s", stage["name"], scan_id, exc)
-            write_json(self.storage, key, {**base, "state": "failed",
-                                           "error": (str(exc) or type(exc).__name__)[:300]})
+            self._store(scan_id, key, {**base, "state": "failed",
+                                       "error": (str(exc) or type(exc).__name__)[:300]})

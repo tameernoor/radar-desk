@@ -154,8 +154,8 @@ class ScanService:
         )
 
     def delete(self, scan_id: str) -> None:
-        """Remove the source object, the report and the scan record. Refused while a job for the scan is queued or
-        running. In v1 the scan's jobs, results and job artefacts are kept."""
+        """Remove the source object, the report, the readers outputs and the scan record. Refused while a job for the
+        scan is queued or running. In v1 the scan's jobs, results and job artefacts are kept."""
         self.get(scan_id)
         active = [j for j in self.db.jobs_for_scan(scan_id, kind=None) if j.state in ("queued", "submitted")]
         if active:
