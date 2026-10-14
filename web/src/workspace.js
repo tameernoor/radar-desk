@@ -9,6 +9,7 @@ import { wireLogout } from "./login.js";
 import { registerPageTools } from "./pagetools.js";
 import { organCss, UNSCORED_GREY } from "./palette.js";
 import { recipeFor } from "./recipes.js";
+import { mountReport } from "./report.js";
 import { createViewer, rawBytes, tooBig, WINDOWS } from "./viewer.js";
 
 const TERMINAL = new Set(["done", "failed", "cancelled"]);
@@ -18,6 +19,7 @@ const $ = (id) => document.getElementById(id);
 
 const ws = {
   scan: null,
+  report: null,
   job: null, // the latest job for the scan
   resultJob: null, // the done job whose result is on screen (can be older than job)
   result: null,
@@ -728,6 +730,8 @@ async function main() {
   });
 
   renderScanBar(scan);
+  ws.report = mountReport({ scanId: scan.id, onChange: () => {} });
+  ws.report.load().catch(() => {});
   wireToolbar();
   wireKeys();
   wireBars();

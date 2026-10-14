@@ -9,6 +9,7 @@ Research use only. Not a medical device.
 ## Use
 
 - Upload a `.nii` / `.nii.gz` scan and press Score.
+- Add the radiologist's report from the scan bar ("Add report": paste it or choose a `.txt` file). Optional.
 - Click a finding or organ to jump to it.
 - `w` what am I looking at · `m` main + reference views · `f` focus mode · `1`-`5` window presets · `+` `-` zoom.
 - Light panel: window/level in HU, gamma, invert, colour map.
