@@ -107,7 +107,7 @@ class ScanService:
         """Remove the source object and the scan record. Refused while a job for the scan is queued or
         running. In v1 the scan's jobs, results and job artefacts are kept."""
         self.get(scan_id)
-        active = [j for j in self.db.jobs_for_scan(scan_id) if j.state in ("queued", "submitted")]
+        active = [j for j in self.db.jobs_for_scan(scan_id, kind=None) if j.state in ("queued", "submitted")]
         if active:
             raise ServiceError(409, f"job {active[0].id} is {active[0].state}; cancel it first")
         self.storage.delete(source_key(scan_id))

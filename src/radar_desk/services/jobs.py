@@ -54,6 +54,7 @@ class JobService:
         # Fake results must never pass for real ones, so they get their own model version.
         self.model_version = f"fake-{version}" if compute.mode == "fake" else version
         self._create_lock = threading.Lock()
+        self.after_create: list[Callable[[str], None]] = []  # e.g. NV-Reason-CT's ensure_job, with the scan id
 
     def get(self, job_id: str) -> Job:
         job = self.db.get_job(job_id)
@@ -65,6 +66,17 @@ class JobService:
         return self.db.list_jobs(state=state, scan_id=scan_id, limit=limit)
 
     def create(self, scan_id: str) -> Job:
+        """Queue a job, or return the queued or submitted one for this scan and model version. Listeners in
+        after_create run afterwards; a failing listener is logged and never fails the RADAR job."""
+        job = self._create(scan_id)
+        for listener in self.after_create:
+            try:
+                listener(scan_id)
+            except Exception:
+                log.exception("jobs: an after-create listener failed for scan %s", scan_id)
+        return job
+
+    def _create(self, scan_id: str) -> Job:
         """Queue a job, or return the queued or submitted one for this scan and model version."""
         scan = self.db.get_scan(scan_id)
         if scan is None:
@@ -84,8 +96,15 @@ class JobService:
             self.db.insert_job(job)
             return job
 
-    def cancel(self, job_id: str) -> Job:
+    def _radar_job(self, job_id: str) -> Job:
+        """A RADAR job. Other kinds (NV-Reason-CT) are not RADAR's to cancel or retry, so they read as missing."""
         job = self.get(job_id)
+        if job.kind != "radar":
+            raise ServiceError(404, f"no job {job_id}")
+        return job
+
+    def cancel(self, job_id: str) -> Job:
+        job = self._radar_job(job_id)
         if job.state == "queued":
             return self.db.transition(job, "cancelled", finished_at=iso_at(self.clock()))
         if job.state != "submitted":
@@ -104,7 +123,7 @@ class JobService:
 
     def retry(self, job_id: str) -> Job:
         """Re-queue a failed job, or release a held one. Earlier attempts' cost stays."""
-        job = self.get(job_id)
+        job = self._radar_job(job_id)
         if job.state == "failed":
             return self.db.transition(job, "queued", queued_at=iso_at(self.clock()), lease_losses=0)
         if job.state == "queued":

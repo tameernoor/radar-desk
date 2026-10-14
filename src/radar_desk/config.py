@@ -101,6 +101,9 @@ class Settings(BaseSettings):
     llm_base_url: str | None = None  # None means the provider's default
     chat_model: str | None = None
 
+    # NV-Reason-CT as a second reader (Readers lens); runs only in compute mode modal (or fake)
+    nvreason_enabled: bool = False
+
     max_upload_bytes: int = 314_572_800
 
     @field_validator("runpod_gpus")

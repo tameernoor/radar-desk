@@ -28,7 +28,7 @@ COMPUTE_ENV = ("WORKER_IMAGE", "WORKER_PUBLIC_URL", "WORKER_TUNNEL", "RUNPOD_API
                "RADAR_POD_IDLE_DELETE_S", "RADAR_POD_APP_LOST_DELETE_S", "RUNPOD_ENDPOINT_ID",
                "RUNPOD_S3_ACCESS_KEY_ID", "RUNPOD_S3_SECRET_ACCESS_KEY", "RUNPOD_SERVERLESS_GPUS",
                "RUNPOD_SERVERLESS_PRICE_USD_PER_S", "RUNPOD_SERVERLESS_IDLE_S", "RUNPOD_SERVERLESS_VISIBILITY_S",
-               "RUNPOD_SERVERLESS_QUEUE_WARN_S")
+               "RUNPOD_SERVERLESS_QUEUE_WARN_S", "NVREASON_ENABLED")
 
 
 @pytest.fixture(autouse=True)
@@ -67,7 +67,7 @@ def make_services(tmp_path: Path):
     from radar_desk.gpu.fake import FakeGpuBackend
     from radar_desk.services import build_services
 
-    def build(backend=None, clock=None, fixtures_root=None, storage=None, **overrides):
+    def build(backend=None, clock=None, fixtures_root=None, storage=None, nv_backend=None, **overrides):
         settings = Settings(
             _env_file=None,
             owner_token="test-owner",
@@ -80,6 +80,8 @@ def make_services(tmp_path: Path):
             kw["storage"] = storage
         if fixtures_root is not None:
             kw["fixtures_root"] = fixtures_root
+        if nv_backend is not None:
+            kw["nv_backend"] = nv_backend
         return build_services(settings, backend=backend if backend is not None else FakeGpuBackend(), **kw)
 
     return build

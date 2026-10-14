@@ -27,6 +27,7 @@ uv sync
 cd web && npm install && npm run build && cd ..
 cp .env.example .env        # fill in the settings it lists
 set -a && source .env && set +a && uv run modal deploy worker/modal_app.py   # Modal mode only
+set -a && source .env && set +a && uv run modal deploy worker/nvreason_app.py   # optional second reader, Modal mode only
 uv run python -m radar_desk  # http://127.0.0.1:8000, log in with OWNER_TOKEN
 ```
 
@@ -80,6 +81,8 @@ Pick on the jobs page (or `uv run python -m radar_desk.compute <mode>`):
 Own GPU: needs a 24 GB NVIDIA card. Tested on RunPod 4090 and L4 (same image), not yet on home or on-prem hardware. Apple GPU: `scripts/score_local.py --device mps` is correct but needs about 32 GB of memory.
 
 New worker version: merge, tag `worker-vX.Y`, push the tag, set `WORKER_IMAGE=...:X.Y`. Then restart the app (pods), `scripts/runpod_endpoint.py update` (serverless), `modal deploy worker/modal_app.py` (Modal).
+
+NV-Reason-CT (optional, Modal mode only): NVIDIA's CT model writes its own report of each scan, as a second reader next to RADAR. Deploy `worker/nvreason_app.py` (line above) and set `NVREASON_ENABLED=1`. Scoring a scan then also starts one NV-Reason-CT report on an L4, about 2 minutes including the model load. The first run downloads the model (10.6 GB) into the Modal Volume `nvreason-hf-cache`.
 
 ## Results
 

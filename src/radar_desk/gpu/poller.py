@@ -56,6 +56,10 @@ class Poller:
             self.services.compute.tick(now)
         except Exception:
             log.exception("poller: the compute tick failed")
+        try:
+            self.services.nvreason.tick(now)
+        except Exception:
+            log.exception("poller: the NV-Reason-CT tick failed")
         for job in reversed(self.db.list_jobs(state="submitted", limit=ALL)):
             backend = self._backend_for(job)
             if getattr(backend, "pull", False):
