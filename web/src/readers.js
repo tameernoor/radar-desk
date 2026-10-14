@@ -72,5 +72,5 @@ export function nvPendingOf(view) {
 
 // While true the tab polls the server again.
 export function isBusy(view) {
-  return nvPendingOf(view) || view.report?.status === "pending" || view.queries?.status === "pending";
+  return nvPendingOf(view) || view.report?.status === "pending" || view.queries?.status === "pending" || Boolean(view.nv?.asking?.length);
 }

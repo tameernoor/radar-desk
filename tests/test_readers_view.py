@@ -94,7 +94,7 @@ def test_view_of_an_old_scan_without_nv_or_report(readers_world):
     view = w.svc.readers.view(w.scan.id)
     assert view["has_report"] is False and view["report"]["status"] == "none"
     assert view["nv"] == {"unavailable": OFF, "job": None, "read": {"status": "none", "error": None}, "crop": None,
-                          "fake": False, "warm": False}
+                          "fake": False, "warm": False, "asking": [], "ask_errors": {}}
     assert view["radar"] == {"job_id": "job_old", "coverage": False}
     assert len(view["rows"]) == 22
     assert all(r["report"] is None and r["nv"] is None for r in view["rows"])

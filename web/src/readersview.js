@@ -5,6 +5,8 @@ import { el, pct } from "./format.js";
 import { arrange, foldText, KEY, nvPendingOf, STATE_TEXT, SYMBOL } from "./readers.js";
 
 const NAMES = { report: "Report", radar: "RADAR", nv: "NV" };
+const YES_NO_SUFFIX = "Answer only Yes or No."; // mirrors the Python constant; hidden in the display, still sent to NV
+const shown = (text) => text.endsWith(YES_NO_SUFFIX) ? text.slice(0, -YES_NO_SUFFIX.length).trimEnd() : text;
 const HOLDS = { needs_modal: "needs Modal compute", budget: "over the monthly GPU budget", spawn_error: "could not start, trying again" };
 
 export function createReadersView({ root, onOrgan, onRetryReads, onRunNv, onAsk, onAskChat }) {
@@ -78,15 +80,16 @@ export function createReadersView({ root, onOrgan, onRetryReads, onRunNv, onAsk,
   }
 
   function chip(q) {
-    const busy = state.asking.has(q.id);
+    const busy = state.asking.has(q.id) || Boolean(state.view.nv.asking?.includes(q.id));
+    const inFlight = state.asking.size > 0 || Boolean(state.view.nv.asking?.length);
     const waiting = state.view.nv.warm ? "Asking NV-Reason-CT…" : "Waking NV-Reason-CT, about 2 minutes…";
-    return el("button", { type: "button", class: "rchip", "data-query": q.id, disabled: state.asking.size > 0, title: "Ask NV-Reason-CT this question", onclick: (e) => (e.stopPropagation(), ask(q)) }, busy ? waiting : q.text);
+    return el("button", { type: "button", class: "rchip", "data-query": q.id, disabled: inFlight, title: "Ask NV-Reason-CT this question", onclick: (e) => (e.stopPropagation(), ask(q)) }, busy ? waiting : shown(q.text));
   }
 
   function general(view) {
     const items = view.queries?.general || [];
     if (!items.length) return [];
-    return [el("div", { class: "rgeneral" }, el("p", { class: "muted small" }, "Ask NV-Reason-CT in the chat:"), items.map((q) => el("button", { type: "button", class: "rchip", "data-query": q.id, onclick: () => onAskChat(q.text) }, q.text)))];
+    return [el("div", { class: "rgeneral" }, el("p", { class: "muted small" }, "Ask NV-Reason-CT in the chat:"), items.map((q) => el("button", { type: "button", class: "rchip", "data-query": q.id, onclick: () => onAskChat(q.text) }, shown(q.text))))];
   }
 
   function details(row) {
@@ -99,10 +102,14 @@ export function createReadersView({ root, onOrgan, onRetryReads, onRunNv, onAsk,
     if (nvShown && row.nv?.in_view === false) parts.push(el("p", { class: "muted small" }, `Only ${Math.round(row.nv.coverage * 100)}% of the ${row.organ.toLowerCase()} is inside NV's view.`));
     for (const a of row.asked) {
       parts.push(
-        el("p", { class: "rasked" }, el("strong", {}, "Asked NV: "), a.question, el("br"), `NV: ${a.answer ?? "no answer"}`, a.differs ? el("span", { class: "rdiffers" }, ". NV's answer differs from its report") : null),
+        el("p", { class: "rasked" }, el("strong", {}, "Asked NV: "), shown(a.question), el("br"), `NV: ${a.answer ?? "no answer"}`, a.differs ? el("span", { class: "rdiffers" }, `${String(a.answer ?? "").endsWith(".") ? " " : ". "}NV's answer differs from its report`) : null),
       );
     }
     if (row.queries?.length) parts.push(el("div", { class: "rchips" }, row.queries.map(chip)));
+    for (const q of row.queries || []) {
+      const failed = state.view.nv.ask_errors?.[q.id];
+      if (failed) parts.push(el("p", { class: "rretry" }, `${failed[0].toUpperCase()}${failed.slice(1)}.`));
+    }
     return el("div", { class: "rdetails" }, parts);
   }
 

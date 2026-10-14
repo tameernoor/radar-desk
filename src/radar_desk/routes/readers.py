@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 from pydantic import BaseModel
 
 from radar_desk.routes import OWNER, Svc
@@ -36,6 +36,10 @@ class AskBody(BaseModel):
 
 
 @router.post("/{scan_id}/nvreason/ask")
-def ask_nvreason(scan_id: str, body: AskBody, svc: Svc) -> dict:
-    """Ask NV-Reason-CT one question, prepared (query_id) or free. Waits for the answer, up to 4 minutes cold."""
-    return svc.readers.ask(scan_id, question=body.question, query_id=body.query_id)
+def ask_nvreason(scan_id: str, body: AskBody, svc: Svc, response: Response) -> dict:
+    """Ask NV-Reason-CT a prepared question (query_id): checked now, asked in the background, 202 at once, so a
+    proxy never closes a request that waits up to 4 minutes cold. A free question waits for its answer."""
+    if body.query_id:
+        response.status_code = 202
+        return svc.readers.ask_prepared(scan_id, body.query_id)
+    return svc.readers.ask(scan_id, question=body.question)

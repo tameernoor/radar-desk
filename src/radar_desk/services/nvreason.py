@@ -85,6 +85,9 @@ class NvReasonService:
         self._create_lock = threading.Lock()
         self._qa_lock = threading.Lock()
         self._last_gpu_at: float | None = None
+        self._ask_lock = threading.Lock()
+        self._asking: set[tuple[str, str]] = set()  # (scan_id, query_id) asked in the background right now
+        self._ask_failed: dict[tuple[str, str], str] = {}  # the last background failure per question
 
     # Whether NV can run, and on what
 
@@ -305,12 +308,8 @@ class NvReasonService:
             return None
         return COLD_NOTICE
 
-    def ask(self, scan_id: str, question: str, label: str | None = None) -> dict:
-        """Ask NV-Reason-CT one question about the scan, as a follow-up to its own report, and log it to qa.jsonl.
-        A question ending "Answer only Yes or No." runs with thinking off and 16 new tokens, others with thinking."""
-        question = question.strip()
-        if not question:
-            raise ServiceError(422, "the question is empty")
+    def precheck(self, scan_id: str) -> tuple[Job, dict, Any, float]:
+        """The checks before any ask: NV can run, has read this scan, and the budget allows a call. 409 otherwise."""
         why = self.unavailable()
         if why:
             raise ServiceError(409, why)
@@ -324,6 +323,38 @@ class NvReasonService:
         started = self.clock()
         if getattr(backend, "priced", True) and not self.costs.budget_allows_now(started, "modal"):
             raise ServiceError(409, "the monthly GPU budget is used up")
+        return job, report, backend, started
+
+    def begin_background(self, scan_id: str, query_id: str) -> bool:
+        """Mark a question in flight and forget its last failure. False when it is already in flight."""
+        key = (scan_id, query_id)
+        with self._ask_lock:
+            if key in self._asking:
+                return False
+            self._asking.add(key)
+            self._ask_failed.pop(key, None)
+            return True
+
+    def end_background(self, scan_id: str, query_id: str, failure: str | None = None) -> None:
+        key = (scan_id, query_id)
+        with self._ask_lock:
+            self._asking.discard(key)
+            if failure:
+                self._ask_failed[key] = failure
+
+    def ask_state(self, scan_id: str) -> dict:
+        """What the Readers tab shows for questions asked in the background: the ids in flight and the failures."""
+        with self._ask_lock:
+            return {"asking": sorted(q for s, q in self._asking if s == scan_id),
+                    "ask_errors": {q: m for (s, q), m in self._ask_failed.items() if s == scan_id}}
+
+    def ask(self, scan_id: str, question: str, label: str | None = None) -> dict:
+        """Ask NV-Reason-CT one question about the scan, as a follow-up to its own report, and log it to qa.jsonl.
+        A question ending "Answer only Yes or No." runs with thinking off and 16 new tokens, others with thinking."""
+        question = question.strip()
+        if not question:
+            raise ServiceError(422, "the question is empty")
+        job, report, backend, started = self.precheck(scan_id)
         conversation = f"{job.id}:{NV_REGION}"
         history = [e for e in self.qa_entries(job.id) if e.get("conversation") == conversation]
         yes_no = question.endswith(NV_YES_NO_SUFFIX)

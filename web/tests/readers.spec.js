@@ -87,9 +87,11 @@ test("readers tab: a prepared question asks NV-Reason-CT and its answer shows in
   const readers = page.locator('#readers[data-ready="true"]');
   await expect(readers.locator(".rgeneral .rchip")).toHaveCount(view.queries.general.length);
   await readers.locator('.rrow[data-row="ascites"] .rexpand').click();
+  await expect(readers.locator(`.rchip[data-query="${q.id}"]`)).not.toContainText("Answer only Yes or No");
   await readers.locator(`.rchip[data-query="${q.id}"]`).click();
   await expect(readers.getByText("NV's answer differs from its report").first()).toBeVisible({ timeout: 30_000 });
   await expect(readers.locator(".rasked").first()).toContainText("NV: Yes.");
+  await expect(readers.locator(".rasked").first()).not.toContainText("Yes..");
   // The dot stays the report read.
   await expect(readers.locator('.rrow[data-row="ascites"] [data-reader="nv"]')).toHaveAttribute("data-state", "absent");
 });

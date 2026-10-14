@@ -71,6 +71,7 @@ test("busy while NV runs or something is being read", () => {
   expect(isBusy({ ...base, nv: { job: { state: "queued" }, read: { status: "none" } } })).toBe(true);
   expect(isBusy({ ...base, report: { status: "pending" } })).toBe(true);
   expect(isBusy({ ...base, queries: { status: "pending" } })).toBe(true);
+  expect(isBusy({ ...base, nv: { ...base.nv, asking: ["q_1"] } })).toBe(true);
   expect(isBusy({ ...base, nv: { job: null, read: { status: "none" } } })).toBe(false);
 });
 

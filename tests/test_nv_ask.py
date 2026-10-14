@@ -16,6 +16,7 @@ from radar_desk.chat.wire import parse_frames
 from radar_desk.gpu.nvreason_backend import NvAskTimeout
 from radar_desk.services import ServiceError
 from radar_desk.services.nvreason import COLD_NOTICE, NV_REPORT_PROMPT, NV_SCALEDOWN_S, OFF
+from radar_desk.services.readers import _thread_runner
 from readers_seed import NV_READ, QUERIES
 from test_agent import FakeLLM, body, text_turn, tool_turn
 
@@ -67,8 +68,8 @@ def test_a_prepared_question_by_id_shows_in_its_row(readers_world):
     view = w.svc.readers.view(w.scan.id)
     q = next(q for r in view["rows"] if r["id"] == "ascites" for q in r["queries"] if q["kind"] == "yes_no")
     r = client.post(f"/scans/{w.scan.id}/nvreason/ask", json={"query_id": q["id"]})
-    assert r.status_code == 200, r.text
-    assert r.json()["label"] == "ascites" and r.json()["answer"] == "Yes."
+    assert r.status_code == 202, r.text
+    assert r.json() == {"asked": q["id"]}
     row = next(r for r in w.svc.readers.view(w.scan.id)["rows"] if r["id"] == "ascites")
     assert row["asked"][0]["answer"] == "Yes." and row["asked"][0]["differs"] is True
     assert row["nv"]["state"] == "absent"  # the dot stays the report read
@@ -175,3 +176,61 @@ def test_the_chat_rules_name_the_tool(make_services):
     text = system_prompt(make_services(), None, None)
     assert "ask_nv_reason asks NVIDIA's NV-Reason-CT" in text
     assert "never paraphrase it" in text
+
+
+def _yes_no_query(w):
+    view = w.svc.readers.view(w.scan.id)
+    return next(q for r in view["rows"] if r["id"] == "ascites" for q in r["queries"] if q["kind"] == "yes_no")
+
+
+def test_the_chip_route_returns_at_once_and_the_view_follows_the_ask(readers_world):
+    w = nv_done(readers_world)
+    w.svc.readers.runner = _thread_runner
+    q = _yes_no_query(w)
+    started, release = threading.Event(), threading.Event()
+    real_ask = w.nv.ask
+
+    def held_ask(*args):
+        started.set()
+        release.wait(timeout=5)
+        return real_ask(*args)
+
+    w.nv.ask = held_ask
+    t0 = time.monotonic()
+    r = api_client(w.svc).post(f"/scans/{w.scan.id}/nvreason/ask", json={"query_id": q["id"]})
+    assert r.status_code == 202 and time.monotonic() - t0 < 2
+    assert started.wait(timeout=5)
+    view = w.svc.readers.view(w.scan.id)
+    assert view["nv"]["asking"] == [q["id"]] and view["nv"]["ask_errors"] == {}
+    assert next(r for r in view["rows"] if r["id"] == "ascites")["asked"] == []
+    # Pressing it again while it runs does not ask twice.
+    assert api_client(w.svc).post(f"/scans/{w.scan.id}/nvreason/ask", json={"query_id": q["id"]}).status_code == 202
+    release.set()
+    for _ in range(100):
+        if not w.svc.nvreason.ask_state(w.scan.id)["asking"]:
+            break
+        time.sleep(0.05)
+    view = w.svc.readers.view(w.scan.id)
+    assert view["nv"]["asking"] == []
+    assert [a["answer"] for a in next(r for r in view["rows"] if r["id"] == "ascites")["asked"]] == ["Yes."]
+    assert len(w.nv.asks) == 1
+
+
+def test_a_failed_background_ask_shows_in_the_view_and_clears_in_flight(readers_world):
+    w = nv_done(readers_world)
+    q = _yes_no_query(w)
+    w.nv.ask_error = NvAskTimeout("NV-Reason-CT did not answer within 240 s")
+    r = api_client(w.svc).post(f"/scans/{w.scan.id}/nvreason/ask", json={"query_id": q["id"]})
+    assert r.status_code == 202
+    view = w.svc.readers.view(w.scan.id)
+    assert view["nv"]["asking"] == []
+    assert view["nv"]["ask_errors"] == {q["id"]: "could not ask NV-Reason-CT, try again"}
+    w.nv.ask_error = None  # pressing it again clears the failure
+    api_client(w.svc).post(f"/scans/{w.scan.id}/nvreason/ask", json={"query_id": q["id"]})
+    assert w.svc.readers.view(w.scan.id)["nv"]["ask_errors"] == {}
+
+
+def test_the_chip_route_still_refuses_up_front(readers_world):
+    w = readers_world(llm=False)
+    r = api_client(w.svc).post(f"/scans/{w.scan.id}/nvreason/ask", json={"query_id": "q_x"})
+    assert r.status_code == 404

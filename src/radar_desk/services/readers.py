@@ -389,6 +389,7 @@ class ReadersService:
                 "crop": ctx["crop"],
                 "fake": bool(nv_report and nv_report.get("fake")),
                 "warm": self.nvreason.warm(),
+                **self.nvreason.ask_state(scan_id),
             },
             "radar": {"job_id": ctx["radar_job"].id if ctx["radar_job"] else None,
                       "coverage": ctx["coverage"] is not None},
@@ -396,6 +397,34 @@ class ReadersService:
             "queries": {**status["queries"], "general": [q for q in queries if q["label"] is None]},
             "other_mentions": others,
         }
+
+    def ask_prepared(self, scan_id: str, query_id: str) -> dict:
+        """Check a prepared question can be asked now, then ask it in the background and return at once; the answer
+        lands in qa.jsonl and the Readers tab picks it up. A question already in flight is not asked twice."""
+        self.scans.get(scan_id)
+        q = next((q for q in self.queries(self.plan(scan_id)) if q["id"] == query_id), None)
+        if q is None:
+            raise ServiceError(404, f"no prepared question {query_id}")
+        self.nvreason.precheck(scan_id)
+        if not self.nvreason.begin_background(scan_id, query_id):
+            return {"asked": query_id}
+
+        def work() -> None:
+            failure = None
+            try:
+                self.nvreason.ask(scan_id, q["text"], label=q["label"])
+            except ServiceError as exc:
+                failure = exc.detail
+            except Exception as exc:
+                log.exception("readers: asking %s of scan %s failed", query_id, scan_id)
+                failure = str(exc)
+            finally:
+                self.nvreason.end_background(scan_id, query_id, failure and "could not ask NV-Reason-CT, try again")
+                if failure:
+                    log.warning("readers: ask %s of scan %s failed: %s", query_id, scan_id, failure)
+
+        self.runner(work)
+        return {"asked": query_id}
 
     def ask(self, scan_id: str, question: str | None = None, query_id: str | None = None) -> dict:
         """Ask NV-Reason-CT a prepared question (by id) or a free one. A free question with the same words as a
