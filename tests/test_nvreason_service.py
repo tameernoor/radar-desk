@@ -9,6 +9,7 @@ from radar_desk.gpu.backend import Finished
 from radar_desk.gpu.fake import FakeGpuBackend
 from radar_desk.gpu.nvreason_fake import FakeNvReasonBackend, synthesize_nv_result
 from radar_desk.gpu.poller import Poller
+from radar_desk.records import Job, new_id
 from radar_desk.services import ServiceError
 from radar_desk.services.blobs import read_bytes, read_json, replace_bytes
 from radar_desk.services.nvreason import (
@@ -260,3 +261,77 @@ def test_radar_cancel_and_retry_refuse_an_nv_job(nv):
         r = client.post(f"/jobs/{job.id}/{action}")
         assert r.status_code == 404, r.text
     assert svc.db.get_job(job.id).state == "queued"
+
+
+def test_valve_off_still_collects_a_submitted_job_and_the_scan_can_be_deleted(nv):
+    svc, _, poller, scan, _ = nv()
+    svc.jobs.create(scan.id)
+    poller.tick()
+    job = svc.nvreason.latest(scan.id)
+    assert job.state == "submitted"
+    svc.settings.nvreason_enabled = False
+    poller.tick()
+    assert svc.db.get_job(job.id).state == "done"
+    svc.scans.delete(scan.id)
+
+
+def test_valve_off_cancels_a_queued_job(nv):
+    svc, backend, poller, scan, _ = nv()
+    svc.jobs.create(scan.id)
+    svc.settings.nvreason_enabled = False
+    poller.tick()
+    job = svc.nvreason.latest(scan.id)
+    assert job.state == "cancelled" and job.hold_reason is None and OFF in job.error.message
+    assert backend.calls == {}
+
+
+def test_a_non_modal_mode_cancels_a_queued_job(nv):
+    svc, _, poller, scan, _ = nv()
+    svc.jobs.create(scan.id)
+    svc.compute.backends = {"worker": lambda: None}
+    poller.tick()
+    job = svc.nvreason.latest(scan.id)
+    assert job.state == "cancelled" and NEEDS_MODAL in job.error.message
+
+
+def test_a_raising_poll_is_pending_so_the_job_goes_stuck(nv):
+    svc, backend, poller, scan, clock = nv(delay_ticks=10**6)
+    svc.jobs.create(scan.id)
+    poller.tick()
+
+    def boom(call_id):
+        raise OSError("unreachable")
+
+    backend.poll = boom
+    poller.tick()
+    job = svc.nvreason.latest(scan.id)
+    assert job.state == "submitted"
+    clock.advance(NV_STUCK_S + 1)
+    poller.tick()
+    assert svc.db.get_job(job.id).state == "failed" and svc.db.get_job(job.id).error.klass == "stuck"
+
+
+def test_a_raising_settle_fails_the_job(nv, monkeypatch):
+    svc, _, poller, scan, _ = nv()
+    svc.jobs.create(scan.id)
+    poller.tick()
+
+    def boom(*a, **k):
+        raise ValueError("cannot write")
+
+    monkeypatch.setattr(svc.nvreason, "settle", boom)
+    poller.tick()
+    job = svc.nvreason.latest(scan.id)
+    assert job.state == "failed" and job.error.klass == "ValueError"
+
+
+def test_one_nv_job_is_spawned_at_a_time(nv):
+    svc, _, poller, scan, _ = nv()
+    first = svc.nvreason.ensure_job(scan.id)
+    second = Job(id=new_id("job"), scan_id=scan.id, kind=NV_KIND, gpu_requested=["L4"],
+                 model_version=NV_MODEL_VERSION + "-x")
+    svc.db.insert_job(second)
+    poller.tick()
+    assert svc.db.get_job(first.id).state == "submitted" and svc.db.get_job(second.id).state == "queued"
+    poller.tick()  # the first settles, then the second may go
+    assert svc.db.get_job(first.id).state == "done" and svc.db.get_job(second.id).state == "submitted"

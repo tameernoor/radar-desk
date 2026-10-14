@@ -130,20 +130,27 @@ class NvReasonService:
     # The poller's pass
 
     def tick(self, now: float | None = None) -> None:
-        """Collect submitted NV jobs, then spawn queued ones. Does nothing while NVREASON_ENABLED is off."""
-        if not self.settings.nvreason_enabled:
-            return
+        """Collect submitted NV jobs (always, so none is stranded), then spawn at most one queued job, and only
+        while none is submitted: the class runs one container. When NV cannot run, queued jobs are cancelled."""
         now = self.clock() if now is None else now
         for job in reversed(self.db.list_jobs(state="submitted", kind=NV_KIND, limit=1000)):
             try:
                 self._check(job, now)
             except Exception:
                 log.exception("nvreason: checking job %s failed", job.id)
-        for job in reversed(self.db.list_jobs(state="queued", kind=NV_KIND, limit=1000)):
-            try:
-                self._spawn(job, now)
-            except Exception:
-                log.exception("nvreason: spawning job %s failed", job.id)
+        queued = list(reversed(self.db.list_jobs(state="queued", kind=NV_KIND, limit=1000)))
+        why = self.unavailable()
+        if why:
+            for job in queued:
+                self.db.transition(job, "cancelled", finished_at=iso_at(now),
+                                   error=JobError(klass="unavailable", message=f"{why}; start it again when it is on"))
+            return
+        if not queued or self.db.list_jobs(state="submitted", kind=NV_KIND, limit=1):
+            return
+        try:
+            self._spawn(queued[0], now)
+        except Exception:
+            log.exception("nvreason: spawning job %s failed", queued[0].id)
 
     def _hold(self, job: Job, reason: str, error: JobError | None = None) -> None:
         if job.hold_reason != reason or job.error != error:
@@ -154,9 +161,6 @@ class NvReasonService:
         if scan is None or scan.state != "ready":
             self.db.transition(job, "failed", finished_at=iso_at(now),
                                error=JobError(klass="input_error", message="the scan is gone or not ready"))
-            return
-        if self.unavailable():
-            self._hold(job, "needs_modal")
             return
         backend = self.backend()
         if getattr(backend, "priced", True) and not self.costs.budget_allows_now(now, "modal"):
@@ -179,9 +183,9 @@ class NvReasonService:
             return
         try:
             outcome = backend.poll(job.modal_call_id)
-        except Exception as exc:  # noqa: BLE001 - Modal unreachable; try again next tick
+        except Exception as exc:  # noqa: BLE001 - Modal unreachable; read as pending so the stuck rule applies
             log.warning("nvreason: poll of job %s failed: %s", job.id, exc)
-            return
+            outcome = Pending()
         if isinstance(outcome, Pending):
             started = parse_iso(job.submitted_at) if job.submitted_at else now
             if now - started > NV_STUCK_S:
@@ -192,7 +196,13 @@ class NvReasonService:
                 self._finish(job, "failed", now, error=JobError(
                     klass="stuck", message="no result after twice the class timeout; the call was cancelled"))
             return
-        self.settle(job, outcome, now)
+        try:
+            self.settle(job, outcome, now)
+        except Exception as exc:
+            log.exception("nvreason: settling job %s failed", job.id)
+            current = self.db.get_job(job.id)
+            if current is not None and current.state == "submitted":
+                self._finish(current, "failed", now, error=JobError(klass=type(exc).__name__, message=str(exc)))
 
     def settle(self, job: Job, outcome: Finished | Errored, now: float) -> Job:
         """Write a finished call's artefacts and finish the job, or fail it. Writes replace, so settling the same

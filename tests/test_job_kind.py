@@ -51,6 +51,7 @@ def test_a_pull_worker_never_claims_an_nvreason_job(make_services, tmp_path):
 def test_the_radar_poller_ignores_nvreason_jobs(make_services, tmp_path):
     backend = FakeGpuBackend()
     svc = make_services(backend=backend)
+    svc.nvreason.tick = lambda now=None: None  # the NV service has its own tick; this is RADAR's poller alone
     scan = ready_scan(svc, tmp_path)
     nv_job(svc, scan.id, "job_nv_running", submitted=True)
     nv_job(svc, scan.id, "job_nv_waiting")
