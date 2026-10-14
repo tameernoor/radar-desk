@@ -43,19 +43,22 @@ export function disagrees(cells) {
   return states.includes("present") && states.includes("absent");
 }
 
-// Flagged rows first, then rows where any reader says present, then the rest folded away.
+// Flagged rows first, then rows where any reader says present, then rows still waiting on a reader (never folded,
+// since the fold says nobody reports it), then the rest folded away.
 export function arrange(rows, opts) {
   const flagged = [];
   const positive = [];
+  const waiting = [];
   const folded = [];
   for (const row of rows) {
     const cells = cellsFor(row, opts);
     const item = { row, cells, flag: disagrees(cells) };
     if (item.flag) flagged.push(item);
     else if (Object.values(cells).includes("present")) positive.push(item);
+    else if (Object.values(cells).includes("pending")) waiting.push(item);
     else folded.push(item);
   }
-  return { flagged, positive, folded };
+  return { flagged, positive, waiting, folded };
 }
 
 export function foldText(n) {

@@ -73,3 +73,25 @@ test("busy while NV runs or something is being read", () => {
   expect(isBusy({ ...base, queries: { status: "pending" } })).toBe(true);
   expect(isBusy({ ...base, nv: { job: null, read: { status: "none" } } })).toBe(false);
 });
+
+test("a row waiting on a reader is never folded", () => {
+  const rows = [
+    row("wait", { report: { state: "absent" }, radar: { scored: true, max_prob: 0.1 } }),
+    row("pos", { radar: { scored: true, max_prob: 0.9 } }),
+  ];
+  for (const opts of [{ threshold: 50, nvPending: true }, { threshold: 50, reportPending: true }]) {
+    const out = arrange(rows, opts);
+    expect(out.folded.map((x) => x.row.id)).toEqual([]);
+    expect(out.positive.map((x) => x.row.id)).toEqual(["pos"]);
+    expect(out.waiting.map((x) => x.row.id)).toEqual(["wait"]);
+  }
+});
+
+test("pending and outside never make a flag", () => {
+  expect(disagrees({ report: "pending", radar: "absent", nv: "none" })).toBe(false);
+  expect(disagrees({ report: "outside", radar: "absent", nv: "none" })).toBe(false);
+});
+
+test("no rows gives empty buckets", () => {
+  expect(arrange([], { threshold: 50 })).toEqual({ flagged: [], positive: [], waiting: [], folded: [] });
+});
