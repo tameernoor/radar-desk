@@ -94,7 +94,9 @@ def test_view_of_an_old_scan_without_nv_or_report(readers_world):
     view = w.svc.readers.view(w.scan.id)
     assert view["has_report"] is False and view["report"]["status"] == "none"
     assert view["nv"] == {"unavailable": OFF, "job": None, "read": {"status": "none", "error": None}, "crop": None,
-                          "fake": False, "warm": False, "asking": [], "ask_errors": {}}
+                          "fake": False, "warm": False, "report": None, "answers": [], "asking": [],
+                          "ask_errors": {}}
+    assert view["report"] == {"status": "none", "error": None, "text": None}
     assert view["radar"] == {"job_id": "job_old", "coverage": False}
     assert len(view["rows"]) == 22
     assert all(r["report"] is None and r["nv"] is None for r in view["rows"])
@@ -113,6 +115,10 @@ def test_view_with_everything(readers_world):
     assert view["report"]["status"] == "ready" and view["nv"]["read"]["status"] == "ready"
     assert view["nv"]["job"]["state"] == "done" and view["nv"]["fake"] is True
     assert view["nv"]["crop"]["box_mm"] and view["radar"]["coverage"] is True
+    assert view["report"]["text"] == SYNTHETIC_REPORT
+    nv_report = view["nv"]["report"]
+    assert "IMPRESSION:" in nv_report["answer"] and "<answer>" not in nv_report["answer"]
+    assert nv_report["thinking"] == "Fake thinking."
     rows = {r["id"]: r for r in view["rows"]}
     assert rows["ascites"]["report"]["state"] == "present" and rows["ascites"]["nv"]["state"] == "absent"
     assert any(isinstance(r["nv"]["coverage"], float) for r in view["rows"] if r["nv"])

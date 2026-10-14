@@ -57,6 +57,7 @@ export function mountReport({ scanId, onChange }) {
   $("report-cancel").addEventListener("click", () => dialog.close());
 
   return {
+    open: openDialog,
     async load() {
       try {
         current = (await get(path)).text;

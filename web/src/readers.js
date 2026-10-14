@@ -74,3 +74,47 @@ export function nvPendingOf(view) {
 export function isBusy(view) {
   return nvPendingOf(view) || view.report?.status === "pending" || view.queries?.status === "pending" || Boolean(view.nv?.asking?.length);
 }
+
+// NV's report text split at its IMPRESSION: heading. With no heading the whole text is the impression.
+export function splitReport(answer) {
+  const text = String(answer ?? "").trim();
+  const m = /IMPRESSION:?/i.exec(text);
+  if (!m) return { findings: "", impression: text };
+  return { findings: text.slice(0, m.index).trim(), impression: text.slice(m.index + m[0].length).trim() };
+}
+
+// Every prepared question once, general ones first, then each row's, de-duplicated by id.
+export function allQuestions(view) {
+  const seen = new Set();
+  const out = [];
+  for (const q of [...(view.queries?.general || []), ...view.rows.flatMap((r) => r.queries || [])]) {
+    if (seen.has(q.id)) continue;
+    seen.add(q.id);
+    out.push(q);
+  }
+  return out;
+}
+
+// The latest answer NV gave to a prepared question (matched by its words), or null.
+export function answerFor(view, q) {
+  const all = view.nv?.answers || [];
+  for (let i = all.length - 1; i >= 0; i--) if (all[i].question === q.text) return all[i];
+  return null;
+}
+
+// Why there are no questions to show yet.
+export function noQuestionsText(view) {
+  const nv = view.nv || {};
+  if (!nv.job) return nv.unavailable ? `No questions yet. NV-Reason-CT: ${nv.unavailable}.` : "No questions yet. Run NV-Reason-CT first; its report is what the questions are written from.";
+  if (nv.job.state !== "done") return "No questions yet. They are written once NV-Reason-CT has read the scan.";
+  if (nv.read?.status === "no_llm" || view.queries?.status === "no_llm") return "No questions yet. Writing them needs a chat model.";
+  if (nv.read?.status === "failed" || view.queries?.status === "failed") return "The questions could not be written. Retry from the reports above.";
+  return "Writing the questions…";
+}
+
+// The radiologist's report shortened to its first lines, with whether anything was cut.
+export const REPORT_LINES = 12;
+export function clipLines(text, max = REPORT_LINES) {
+  const lines = String(text ?? "").split("\n");
+  return lines.length > max ? { text: lines.slice(0, max).join("\n"), cut: true } : { text: String(text ?? ""), cut: false };
+}

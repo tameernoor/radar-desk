@@ -96,3 +96,24 @@ test("pending and outside never make a flag", () => {
 test("no rows gives empty buckets", () => {
   expect(arrange([], { threshold: 50 })).toEqual({ flagged: [], positive: [], waiting: [], folded: [] });
 });
+
+test("splitReport takes the text after IMPRESSION:", async () => {
+  const { splitReport } = await import("../src/readers.js");
+  expect(splitReport("FINDINGS:\nLiver: ok.\n\nIMPRESSION:\n1. A.\n2. B.")).toEqual({ findings: "FINDINGS:\nLiver: ok.", impression: "1. A.\n2. B." });
+  expect(splitReport("Just text.")).toEqual({ findings: "", impression: "Just text." });
+  expect(splitReport(null)).toEqual({ findings: "", impression: "" });
+});
+
+test("allQuestions de-duplicates by id and answerFor takes the latest answer", async () => {
+  const { allQuestions, answerFor, clipLines, noQuestionsText } = await import("../src/readers.js");
+  const g = { id: "q_g", text: "General?" };
+  const a = { id: "q_a", text: "A?" };
+  const view = { queries: { general: [g] }, rows: [{ queries: [a, g] }, { queries: [a] }, { queries: undefined }], nv: { answers: [{ question: "A?", answer: "No." }, { question: "A?", answer: "Yes." }] } };
+  expect(allQuestions(view).map((q) => q.id)).toEqual(["q_g", "q_a"]);
+  expect(answerFor(view, a).answer).toBe("Yes.");
+  expect(answerFor(view, g)).toBeNull();
+  expect(clipLines("a\nb\nc", 2)).toEqual({ text: "a\nb", cut: true });
+  expect(clipLines("a\nb", 2)).toEqual({ text: "a\nb", cut: false });
+  expect(noQuestionsText({ nv: { job: null, unavailable: "needs Modal compute" } })).toContain("NV-Reason-CT: needs Modal compute");
+  expect(noQuestionsText({ nv: { job: { state: "queued" } } })).toContain("once NV-Reason-CT has read");
+});

@@ -75,23 +75,49 @@ test("readers tab: rows, flags, fold, display line, words, jump, NV's view", asy
   await expect(page.locator('#findings[data-ready="true"] .finding')).toHaveCount(146, { timeout: 30_000 });
 });
 
-test("readers tab: a prepared question asks NV-Reason-CT and its answer shows in the row", async ({ page }) => {
+test("readers tab: reports and questions are visible on open, a question is answered in place", async ({ page }) => {
   await login(page);
   const scan = await seededScan(page);
   const view = await (await page.request.get(`/scans/${scan.id}/readers`)).json();
   const q = view.rows.find((r) => r.id === "ascites").queries.find((x) => x.kind === "yes_no");
   expect(q, "a seeded yes/no question for ascites").toBeTruthy();
+  expect(view.nv.report.answer).toContain("IMPRESSION:");
+  expect(view.report.text).toContain("Small volume ascites");
 
   await page.goto(`/workspace.html?scan=${encodeURIComponent(scan.id)}`);
   await page.getByRole("tab", { name: "Readers" }).click();
   const readers = page.locator('#readers[data-ready="true"]');
-  await expect(readers.locator(".rgeneral .rchip")).toHaveCount(view.queries.general.length);
+  await expect(readers.getByText("Three readers of the same scan")).toBeVisible();
+
+  await page.screenshot({ path: "../.superpowers/sdd/2026-10-14-readers-lens/ux-top.png" });
+  // Reports: NV's impression in full, its findings and reasoning folded, never the answer tag; the radiologist's text.
+  const nv = readers.locator('[data-card="nv"]');
+  await expect(nv.locator('[data-part="impression"]')).toContainText("2. Left renal cyst.");
+  await expect(nv.locator('[data-part="impression"]')).not.toContainText("<answer>");
+  await expect(nv).not.toContainText("answer>");
+  await expect(nv.getByText("Liver: A small hypodense lesion")).toBeHidden();
+  await nv.getByText("Findings", { exact: true }).click();
+  await expect(nv.getByText("Liver: A small hypodense lesion")).toBeVisible();
+  await expect(nv.getByText("Fake thinking.")).toBeHidden();
+  await expect(nv).toContainText("Research model. It saw a 384 mm cube of the scan.");
+  await expect(readers.locator('[data-part="radiologist"]')).toContainText("Small volume ascites in the pelvis.");
+
+  // Questions: every prepared question once, no answer yet.
+  const ask = readers.locator("section", { has: page.getByRole("heading", { name: "Ask NV-Reason-CT" }) });
+  const ids = [...new Set([...view.queries.general, ...view.rows.flatMap((r) => r.queries || [])].map((x) => x.id))];
+  await expect(ask.locator(".rchip")).toHaveCount(ids.length);
+  await expect(ask.getByText("Or type your own question in the chat on the right.")).toBeVisible();
+  await expect(ask.locator(`.rchip[data-query="${q.id}"]`)).not.toContainText("Answer only Yes or No");
+
+  await ask.locator(`.rchip[data-query="${q.id}"]`).click();
+  const asked = ask.locator(`.rq[data-q="${q.id}"]`);
+  await expect(asked.locator(".rqa")).toContainText("NV: Yes.", { timeout: 30_000 });
+  await expect(asked.locator(".rqa")).not.toContainText("Yes..");
+  await expect(asked.getByText("NV's answer differs from its report")).toBeVisible();
+  await page.screenshot({ path: "../.superpowers/sdd/2026-10-14-readers-lens/ux-asked.png" });
+
+  // The same question in its row shows the same answer; the dot stays the report read.
   await readers.locator('.rrow[data-row="ascites"] .rexpand').click();
-  await expect(readers.locator(`.rchip[data-query="${q.id}"]`)).not.toContainText("Answer only Yes or No");
-  await readers.locator(`.rchip[data-query="${q.id}"]`).click();
-  await expect(readers.getByText("NV's answer differs from its report").first()).toBeVisible({ timeout: 30_000 });
-  await expect(readers.locator(".rasked").first()).toContainText("NV: Yes.");
-  await expect(readers.locator(".rasked").first()).not.toContainText("Yes..");
-  // The dot stays the report read.
+  await expect(readers.locator(`.rdetails .rq[data-q="${q.id}"] .rqa`)).toContainText("NV: Yes.");
   await expect(readers.locator('.rrow[data-row="ascites"] [data-reader="nv"]')).toHaveAttribute("data-state", "absent");
 });

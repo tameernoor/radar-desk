@@ -144,6 +144,16 @@ def _job_view(job: Any) -> dict | None:
             "error": job.error.model_dump(by_alias=True) if job.error else None, "finished_at": job.finished_at}
 
 
+def _nv_report_view(report: dict | None) -> dict | None:
+    """NV's own report for the Readers tab: its answer (the tag already split out) and its thinking."""
+    if not report:
+        return None
+    answer = report.get("answer")
+    if not isinstance(answer, str):
+        answer = str(report.get("text") or "").partition("<answer>")[0].rstrip()
+    return {"answer": answer, "thinking": str(report.get("thinking") or "")}
+
+
 def _thread_runner(work: Callable[[], None]) -> None:
     threading.Thread(target=work, daemon=True, name="readers").start()
 
@@ -378,16 +388,22 @@ class ReadersService:
         report_read, nv_read = self.read(plan, "report_read"), self.read(plan, "nv_read")
         others = [{"reader": "report", "quote": q} for q in (report_read or {}).get("other_mentions", [])]
         others += [{"reader": "nv", "quote": q} for q in (nv_read or {}).get("other_mentions", [])]
+        nv_states = {r["id"]: (r["nv"] or {}).get("state") for r in ctx["rows"]}
+        answers = [{"question": e.get("question"), "answer": e.get("answer"), "label": e.get("label"),
+                    "asked_at": e.get("asked_at"), "differs": differs(e.get("answer") or "", nv_states.get(e.get("label")))}
+                   for e in (self.nvreason.qa_entries(ctx["nv_done"].id) if ctx["nv_done"] else [])]
         return {
             "scan_id": scan_id,
             "has_report": plan["report_read"]["text"] is not None,
-            "report": status["report_read"],
+            "report": {**status["report_read"], "text": plan["report_read"]["text"]},
             "nv": {
                 "unavailable": self.nvreason.unavailable(),
                 "job": _job_view(self.nvreason.latest(scan_id)),
                 "read": status["nv_read"],
                 "crop": ctx["crop"],
                 "fake": bool(nv_report and nv_report.get("fake")),
+                "report": _nv_report_view(nv_report),
+                "answers": answers,
                 "warm": self.nvreason.warm(),
                 **self.nvreason.ask_state(scan_id),
             },

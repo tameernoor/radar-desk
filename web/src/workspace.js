@@ -818,6 +818,7 @@ async function main() {
       await loadReaders();
     },
     onAskChat: askNvInChat,
+    onAddReport: () => ws.report?.open(),
   });
   ws.findings.setCatalog(catalog.findings, labels.scored_organs);
   ws.catalog = catalog.findings;
