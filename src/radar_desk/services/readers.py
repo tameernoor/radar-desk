@@ -21,8 +21,8 @@ import numpy as np
 
 from radar_desk.radar import catalog
 from radar_desk.readers.labels import LABELS, LABELS_SHA256
-from radar_desk.readers.prompts import READ_PROMPT_SHA
-from radar_desk.readers.reading import read_text
+from radar_desk.readers.prompts import QUERY_PROMPT_SHA, READ_PROMPT_SHA
+from radar_desk.readers.reading import read_text, write_queries
 from radar_desk.records import now_iso
 from radar_desk.services.blobs import read_bytes, read_json, write_json
 
@@ -86,6 +86,21 @@ def differs(answer: str, nv_state: str | None) -> bool:
     """NV's direct answer contradicts its own report read: Yes against absent, or No against present."""
     polarity = answer_polarity(answer)
     return polarity is not None and nv_state in ("present", "absent") and polarity != nv_state
+
+
+def row_cells(row: dict, threshold: float = 0.5) -> dict[str, str]:
+    """A row's three states the way web/src/readers.js draws them, at a display line from 0 to 1."""
+    radar = row["radar"]
+    r = "not_scored" if not radar["scored"] else ("present" if radar["max_prob"] >= threshold else "absent")
+    rep = row["report"]["state"] if row["report"] else "none"
+    nv = "none" if row["nv"] is None else ("outside" if row["nv"]["in_view"] is False else row["nv"]["state"])
+    return {"report": rep, "radar": r, "nv": nv}
+
+
+def is_disputed(row: dict) -> bool:
+    """Flagged at the default display line: one reader says present, another absent."""
+    states = set(row_cells(row).values())
+    return "present" in states and "absent" in states
 
 
 def build_rows(labels: list[dict], report_read: dict | None, nv_read: dict | None, result: Any,
@@ -178,7 +193,39 @@ class ReadersService:
             inputs = None if text is None else {"text": sha(text), "labels": LABELS_SHA256, "prompt": READ_PROMPT_SHA,
                                                 "model": self.settings.chat_model}
             out[name] = {**self._stage(scan_id, name, inputs), "text": text}
+        out["queries"] = self.query_stage(scan_id, out)
         return out
+
+    def query_stage(self, scan_id: str, plan: dict) -> dict:
+        """The prepared questions as a stage. Their inputs: both reads, RADAR's job, the organs mostly outside NV's
+        crop and the disputed rows, so they are written again whenever one of those changes."""
+        nv = plan["nv_read"]
+        if nv["status"] != "ready":
+            return self._stage(scan_id, "queries", None)
+        ctx = self.context(scan_id, plan)
+        outside = sorted(o for o, share in (ctx["coverage"] or {}).items() if share < IN_VIEW)
+        disputed = [r["id"] for r in ctx["rows"] if is_disputed(r)]
+        report = plan["report_read"]
+        inputs = {
+            "nv_read": nv["hash"],
+            "report_read": report["hash"] if report["status"] == "ready" else None,
+            "radar_job": ctx["radar_job"].id if ctx["radar_job"] else None,
+            "outside": outside,
+            "disputed": disputed,
+            "labels": LABELS_SHA256,
+            "prompt": QUERY_PROMPT_SHA,
+            "model": self.settings.chat_model,
+        }
+        stage = self._stage(scan_id, "queries", inputs)
+        stage["context"] = {"labels": LABELS, "nv_text": nv["text"], "crop": ctx["crop"], "outside": outside,
+                            "disputed": disputed,
+                            "nv_findings": [r["id"] for r in ctx["rows"] if r["nv"] and r["nv"]["state"] == "present"]}
+        return stage
+
+    @staticmethod
+    def queries(plan: dict) -> list[dict]:
+        stage = plan["queries"]
+        return stage["stored"]["queries"] if stage["status"] == "ready" else []
 
     @staticmethod
     def read(plan: dict, name: str) -> dict | None:
@@ -239,8 +286,7 @@ class ReadersService:
 
     def delete(self, scan_id: str) -> None:
         """Remove every stored output of the scan (they quote the patient report) and stop any in-flight refresh from
-        writing one back. Scan ids are never reused, so the tombstone stays for the process lifetime.
-        queries.json is Task 11's."""
+        writing one back. Scan ids are never reused, so the tombstone stays for the process lifetime."""
         with self._lock:
             self._deleted.add(scan_id)
             for name in (*READS, "queries"):
@@ -253,11 +299,13 @@ class ReadersService:
                 write_json(self.storage, key, value)
 
     def refresh(self, scan_id: str, force: bool = False) -> None:
-        """Bring each output up to date with its inputs, in order, synchronously."""
+        """Bring each output up to date with its inputs, in order, synchronously: the reads, then the questions."""
         plan = self.plan(scan_id)
         for name in READS:
             self._run_stage(scan_id, plan[name], force,
                             lambda stage: {"read": read_text(self.llm, stage["text"], LABELS)})
+        stage = self.plan(scan_id)["queries"]  # the reads may have changed its inputs
+        self._run_stage(scan_id, stage, force, lambda st: {"queries": write_queries(self.llm, st["context"])})
 
     def _run_stage(self, scan_id: str, stage: dict, force: bool, produce: Callable[[dict], dict]) -> None:
         key = readers_key(scan_id, stage["name"])
@@ -321,6 +369,9 @@ class ReadersService:
         self.kick(scan_id)
         plan = self.plan(scan_id)
         ctx = self.context(scan_id, plan)
+        queries = self.queries(plan)
+        for row in ctx["rows"]:
+            row["queries"] = [q for q in queries if q["label"] == row["id"]]
         status = self.status(scan_id, plan)
         nv_report = self.nvreason.report(ctx["nv_done"].id) if ctx["nv_done"] else None
         report_read, nv_read = self.read(plan, "report_read"), self.read(plan, "nv_read")
@@ -341,5 +392,6 @@ class ReadersService:
             "radar": {"job_id": ctx["radar_job"].id if ctx["radar_job"] else None,
                       "coverage": ctx["coverage"] is not None},
             "rows": ctx["rows"],
+            "queries": {**status["queries"], "general": [q for q in queries if q["label"] is None]},
             "other_mentions": others,
         }

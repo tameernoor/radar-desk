@@ -49,6 +49,14 @@ NV_READ = read_reply(
 )
 
 
+QUERIES = json.dumps({"queries": [
+    {"label": "ascites", "kind": "yes_no",
+     "text": "Is there free fluid in the abdomen or pelvis? Answer only Yes or No."},
+    {"label": "ascites", "kind": "follow_up", "text": "Where is the free fluid, and how does it look?"},
+    {"label": None, "kind": "reasoning", "text": "Give a full reasoning analysis of this scan."},
+]})
+
+
 def scripted_replies() -> list[str]:
-    """The chat model's replies for one full refresh, in the order the refresh asks: report read, NV read."""
-    return [REPORT_READ, NV_READ]
+    """The chat model's replies for one full refresh, in the order the refresh asks: report read, NV read, queries."""
+    return [REPORT_READ, NV_READ, QUERIES]

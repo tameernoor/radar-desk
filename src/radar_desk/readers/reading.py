@@ -8,11 +8,14 @@ unusable answer is asked again once, then the read fails.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import re
 from typing import Any
 
 from radar_desk.chat.llm import LlmError, TextDelta
-from radar_desk.readers.prompts import read_messages
+from radar_desk.gpu.nvreason_fake import YES_NO_SUFFIX
+from radar_desk.readers.prompts import QUERY_RETRY, query_messages, read_messages
 
 STATES = ("present", "absent", "not_mentioned")
 ATTEMPTS = 2
@@ -93,3 +96,116 @@ def read_text(llm: Any, text: str, labels: list[dict]) -> dict:
         except (ReadError, LlmError) as exc:
             problem = str(exc)
     raise ReadError(problem)
+
+
+KINDS = ("yes_no", "finding", "follow_up", "differential", "reasoning")
+MAX_QUERY_CHARS = 300
+
+# What a prepared question may not say: it would reveal another reader, or ask what NV-Reason-CT cannot answer.
+_BANNED = [
+    (re.compile(r"\breports?\b|\breported\b", re.IGNORECASE), "mentions a report"),
+    (re.compile(r"\bradiologists?\b", re.IGNORECASE), "mentions the radiologist"),
+    (re.compile(r"\bradar\b", re.IGNORECASE), "mentions RADAR"),
+    (re.compile(r"\bscor(?:e|es|ed|ing)\b", re.IGNORECASE), "mentions a score"),
+    (re.compile(r"%|\bper ?cent", re.IGNORECASE), "mentions a percentage"),
+    (re.compile(r"\bmeasur|\bdiameter|\bdimensions?\b|\bhow (?:big|large)\b|\bsize\b|\d\s*(?:mm|cm)\b"
+                r"|\bmillimet|\bcentimet", re.IGNORECASE), "asks for a measurement"),
+    (re.compile(r"\bprior\b|\bprevious\b|\bearlier\b|\binterval\b|\bcompar", re.IGNORECASE),
+     "mentions a prior scan"),
+]
+
+# Words that name a scored organ, for the check against organs mostly outside NV's cube.
+ORGAN_WORDS = {
+    "Liver": ("liver", "hepatic"),
+    "Kidney": ("kidney", "kidneys", "renal"),
+    "Spleen": ("spleen", "splenic"),
+    "Pancreas": ("pancreas", "pancreatic"),
+    "Gallbladder": ("gallbladder",),
+    "Adrenal gland": ("adrenal", "adrenals"),
+    "Aorta": ("aorta", "aortic"),
+    "Esophagus": ("esophagus", "esophageal", "oesophagus", "hiatal"),
+    "Lung": ("lung", "lungs", "pulmonary", "pleural"),
+    "Rib": ("rib", "ribs"),
+    "Heart": ("heart", "cardiac", "pericardial"),
+    "Stomach": ("stomach", "gastric"),
+    "Bladder": ("bladder",),
+    "Small bowel": ("small bowel", "small intestine", "jejunum", "ileum"),
+    "Large bowel": ("large bowel", "colon", "colonic", "rectum", "rectal"),
+    "Duodenum": ("duodenum", "duodenal"),
+    "Portal vein": ("portal vein",),
+    "Sacrum": ("sacrum", "sacral"),
+}
+
+
+def validate_query(q: Any, label_organs: dict[str, str | None], outside: list[str]) -> str | None:
+    """Why this prepared question breaks NV-Reason-CT's limits, or None when it keeps to them."""
+    if not isinstance(q, dict):
+        return "not an object"
+    text, kind, label = q.get("text"), q.get("kind"), q.get("label")
+    if not isinstance(text, str) or not text.strip():
+        return "no text"
+    text = text.strip()
+    if len(text) > MAX_QUERY_CHARS:
+        return f"longer than {MAX_QUERY_CHARS} characters"
+    if kind not in KINDS:
+        return f"unknown kind {kind!r}"
+    if label is not None and label not in label_organs:
+        return f"unknown label {label!r}"
+    if kind == "yes_no" and not text.endswith(YES_NO_SUFFIX):
+        return f'a yes_no question must end with "{YES_NO_SUFFIX}"'
+    for pattern, why in _BANNED:
+        if pattern.search(text):
+            return why
+    if label is not None and label_organs[label] in outside:
+        return f"asks about {label_organs[label]}, mostly outside the cube"
+    for organ in outside:
+        for word in ORGAN_WORDS.get(organ, (organ.lower(),)):
+            if re.search(rf"\b{re.escape(word)}\b", text, re.IGNORECASE):
+                return f"names {organ}, mostly outside the cube"
+    return None
+
+
+def _split(raw: Any, label_organs: dict, outside: list[str]) -> tuple[list[dict], list[tuple[Any, str]]]:
+    good, bad = [], []
+    for q in raw if isinstance(raw, list) else []:
+        why = validate_query(q, label_organs, outside)
+        if why is None:
+            good.append({"label": q.get("label"), "kind": q["kind"], "text": q["text"].strip()})
+        else:
+            bad.append((q, why))
+    return good, bad
+
+
+def write_queries(llm: Any, ctx: dict) -> list[dict]:
+    """The prepared questions. Rejected ones are sent back once with the reasons; still bad, they are dropped."""
+    label_organs = {r["id"]: r["organ"] for r in ctx["labels"]}
+    messages = query_messages(ctx)
+    answer, raw, problem = "", None, "no answer"
+    for _ in range(ATTEMPTS):
+        try:
+            answer = complete(llm, messages)
+            raw = parse_json(answer).get("queries")
+            if not isinstance(raw, list):
+                raise ReadError("no queries list")
+            break
+        except (ReadError, LlmError) as exc:
+            problem, raw = str(exc), None
+    if raw is None:
+        raise ReadError(problem)
+    good, bad = _split(raw, label_organs, ctx["outside"])
+    if bad:
+        lines = "\n".join(f"- {q.get('text') if isinstance(q, dict) else q} ({why})" for q, why in bad)
+        retry = [*messages, {"role": "assistant", "content": answer},
+                 {"role": "user", "content": f"{QUERY_RETRY}\n{lines}"}]
+        try:
+            again, _ = _split(parse_json(complete(llm, retry)).get("queries"), label_organs, ctx["outside"])
+            good += again
+        except (ReadError, LlmError):
+            pass  # the good ones stand; the rejected ones are dropped
+    out, seen = [], set()
+    for q in good:
+        qid = "q_" + hashlib.sha256(f"{q['label']}|{q['text']}".encode()).hexdigest()[:10]
+        if qid not in seen:
+            seen.add(qid)
+            out.append({"id": qid, **q})
+    return out
