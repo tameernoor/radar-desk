@@ -13,3 +13,11 @@ router = APIRouter(prefix="/scans", tags=["readers"], dependencies=OWNER)
 def start_nvreason(scan_id: str, svc: Svc) -> dict:
     """Queue NV-Reason-CT for the scan, or return its queued, running or finished job."""
     return svc.nvreason.start(scan_id).model_dump()
+
+
+@router.post("/{scan_id}/readers/refresh")
+def refresh_readers(scan_id: str, svc: Svc) -> dict:
+    """Run the reads again: stale ones, and failed ones too (the tab's retry)."""
+    svc.scans.get(scan_id)
+    started = svc.readers.kick(scan_id, force=True)
+    return {"started": started, **svc.readers.status(scan_id)}

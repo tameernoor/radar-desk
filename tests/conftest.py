@@ -67,7 +67,8 @@ def make_services(tmp_path: Path):
     from radar_desk.gpu.fake import FakeGpuBackend
     from radar_desk.services import build_services
 
-    def build(backend=None, clock=None, fixtures_root=None, storage=None, nv_backend=None, **overrides):
+    def build(backend=None, clock=None, fixtures_root=None, storage=None, nv_backend=None,
+              readers_llm=None, readers_runner=None, **overrides):
         settings = Settings(
             _env_file=None,
             owner_token="test-owner",
@@ -82,6 +83,47 @@ def make_services(tmp_path: Path):
             kw["fixtures_root"] = fixtures_root
         if nv_backend is not None:
             kw["nv_backend"] = nv_backend
+        if readers_llm is not None:
+            kw["readers_llm"] = readers_llm
+        if readers_runner is not None:
+            kw["readers_runner"] = readers_runner
         return build_services(settings, backend=backend if backend is not None else FakeGpuBackend(), **kw)
+
+    return build
+
+
+@pytest.fixture
+def readers_world(make_services, tmp_path):
+    """Services with NV on (fake backends that write a RADAR mask and an NV report), a scripted chat model for the
+    reading radiologist, refreshes run inline, and one ready synthetic scan. Returns a namespace with svc, llm, nv,
+    poller, scan and clock."""
+    from types import SimpleNamespace
+
+    from fake_llm import ScriptedLLM
+    from radar_desk.gpu.fake import FakeGpuBackend, synthesize_result
+    from radar_desk.gpu.nvreason_fake import FakeNvReasonBackend, synthesize_nv_result
+    from radar_desk.gpu.poller import Poller
+    from radar_desk.radar import catalog
+    from test_chat_tools import ready_scan
+    from test_poller import Clock
+
+    def build(replies=(), llm=True, enabled=True, **overrides):
+        clock = Clock()
+        holder: dict = {}
+
+        def job_and_scan(job_id):
+            db = holder["svc"].db
+            job = db.get_job(job_id)
+            return job, db.get_scan(job.scan_id)
+
+        gpu = FakeGpuBackend(clock=clock, synthesize=lambda job_id: synthesize_result(
+            *job_and_scan(job_id), holder["svc"].storage, catalog))
+        nv = FakeNvReasonBackend(synthesize=lambda job_id: synthesize_nv_result(*job_and_scan(job_id)))
+        model = ScriptedLLM(list(replies)) if llm else None
+        svc = make_services(backend=gpu, clock=clock, nv_backend=nv, readers_llm=model,
+                            readers_runner=lambda work: work(), nvreason_enabled=enabled, **overrides)
+        holder["svc"] = svc
+        return SimpleNamespace(svc=svc, llm=model, nv=nv, poller=Poller(svc, gpu, clock=clock),
+                               scan=ready_scan(svc, tmp_path), clock=clock)
 
     return build

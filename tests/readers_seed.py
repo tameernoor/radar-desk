@@ -36,3 +36,14 @@ REPORT_READ = read_reply(
     },
     ["Degenerative change of the lumbar spine."],
 )
+
+
+NV_READ = read_reply(
+    {
+        "liver_lesion": ("present", "A small hypodense lesion in the right lobe."),
+        "renal_cyst": ("present", "A simple cyst in the left kidney."),
+        "hydronephrosis": ("absent", "No hydronephrosis."),
+        "ascites": ("absent", "No ascites."),
+    },
+    [],
+)

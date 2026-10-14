@@ -20,6 +20,7 @@ from radar_desk.services.exports import ExportService
 from radar_desk.services.fixtures import DEFAULT_ROOT, FixtureService
 from radar_desk.services.jobs import JobService
 from radar_desk.services.nvreason import NvReasonService
+from radar_desk.services.readers import ReadersService
 from radar_desk.services.results import ResultService
 from radar_desk.services.scans import ScanService
 from radar_desk.services.workers import WorkerService
@@ -43,6 +44,7 @@ class Services:
     exports: ExportService
     workers: WorkerService
     nvreason: NvReasonService
+    readers: ReadersService
 
     @property
     def backend(self) -> Any:
@@ -105,6 +107,14 @@ def make_nv_backend(settings: Any, db: Database, name: str) -> Any:
     return FakeNvReasonBackend(synthesize=synthesize)
 
 
+def _readers_llm(settings: Any) -> Any:
+    """The chat model client for the reading radiologist, or None without CHAT_MODEL. Imported here, not at the top,
+    because the chat package imports the services package."""
+    from radar_desk.chat.agent import make_llm
+
+    return make_llm(settings)
+
+
 def build_services(
     settings: Any,
     *,
@@ -117,6 +127,8 @@ def build_services(
     fixtures_root: Path = DEFAULT_ROOT,
     clock: Callable[[], float] = time.time,
     nv_backend: Any = None,
+    readers_llm: Any = None,
+    readers_runner: Any = None,
 ) -> Services:
     """Wire the services. A backend given here, or GPU_BACKEND=fake, is fixed; modal, worker, runpod and
     serverless give a choice the owner can change, each backend built on first use."""
@@ -150,6 +162,13 @@ def build_services(
     nvreason = NvReasonService(db, settings, storage, compute, costs, nv_factory, clock=clock)
     jobs = JobService(db, settings, compute, costs, clock=clock)
     jobs.after_create.append(nvreason.ensure_job)
+    scans = ScanService(db, storage, settings, fixtures)
+    readers = ReadersService(settings, db, storage, scans, nvreason,
+                             readers_llm if readers_llm is not None else _readers_llm(settings),
+                             runner=readers_runner)
+    scans.report_listeners.append(readers.kick)
+    scans.delete_listeners.append(readers.delete)
+    nvreason.on_done.append(readers.kick)
     return Services(
         settings=settings,
         db=db,
@@ -158,10 +177,11 @@ def build_services(
         catalog=catalog_module,
         fixtures=fixtures,
         costs=costs,
-        scans=ScanService(db, storage, settings, fixtures),
+        scans=scans,
         jobs=jobs,
         results=results,
         exports=ExportService(db, storage, include_fake=compute.mode == "fake"),
         workers=workers,
         nvreason=nvreason,
+        readers=readers,
     )

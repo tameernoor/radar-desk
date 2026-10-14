@@ -57,6 +57,7 @@ class ScanService:
         self.settings = settings
         self.fixtures = fixtures
         self.report_listeners: list[Callable[[str], None]] = []
+        self.delete_listeners: list[Callable[[str], None]] = []
 
     # The radiologist report (Readers lens)
 
@@ -161,6 +162,8 @@ class ScanService:
             raise ServiceError(409, f"job {active[0].id} is {active[0].state}; cancel it first")
         self.storage.delete(source_key(scan_id))
         self.storage.delete(report_key(scan_id))
+        for listener in self.delete_listeners:
+            listener(scan_id)
         self.db.delete_scan(scan_id)
 
     def view_url(self, scan_id: str) -> str:
