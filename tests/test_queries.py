@@ -200,3 +200,33 @@ def test_derived_organ_terms_and_odd_labels():
     assert validate_query(q, ORGANS, []) is None
     for label in (["ascites"], {"a": 1}):
         assert validate_query({"label": label, "kind": "finding", "text": "x"}, ORGANS, []).startswith("unknown label")
+
+
+@pytest.mark.parametrize("text", [
+    "Is the lesion unchanged?" + YN,
+    "Is the lesion growing?" + YN,
+    "Has the lesion enlarged?" + YN,
+    "Is there progression of the ascites?" + YN,
+    "Is this newly seen fluid?" + YN,
+    "Has the cyst resolved?" + YN,
+    "Was a lesion missed in the liver?" + YN,
+    "How certain is the ascites?",
+    "Some readers think there is ascites. Is there?" + YN,
+    "Would most observers see fluid?" + YN,
+])
+def test_residual_leaks_are_rejected(text):
+    assert validate_query({"label": "ascites", "kind": "yes_no", "text": text}, ORGANS, []) is not None
+
+
+def test_present_state_enlarged_and_abdominal_pneum_words_pass():
+    q = {"label": None, "kind": "yes_no", "text": "Is the spleen enlarged?" + YN}
+    assert validate_query(q, ORGANS, []) is None
+    q2 = {"label": None, "kind": "yes_no", "text": "Is there pneumoperitoneum?" + YN}
+    assert validate_query(q2, ORGANS, ["Lung"]) is None
+    q3 = {"label": None, "kind": "finding", "text": "Is there pneumonia at the lung bases?"}
+    assert validate_query(q3, ORGANS, ["Lung"]) == "names Lung, mostly outside the cube"
+
+
+def test_a_measurement_with_a_decimal_gets_the_measurement_reason():
+    q = {"label": None, "kind": "yes_no", "text": "Is there a 2.5 mm stone?" + YN}
+    assert validate_query(q, ORGANS, []) == "asks for a measurement"

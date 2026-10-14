@@ -106,16 +106,19 @@ _BANNED = [
     (re.compile(r"\breports?\b|\breported\b", re.IGNORECASE), "mentions a report"),
     (re.compile(r"\bradiologists?\b", re.IGNORECASE), "mentions the radiologist"),
     (re.compile(r"\bradar\b", re.IGNORECASE), "mentions RADAR"),
-    (re.compile(r"\b(?:another|other|second)\s+(?:reader|observer|model|opinion)\b|\bsomeone\b"
+    (re.compile(r"\b(?:another|other|second)\s+(?:reader|observer|model|opinion)\b|\bsomeone\b|\b(?:readers|observers)\b"
                 r"|\b(?:doctor|clinician|physician|ai|algorithm)\b|\bare you sure\b", re.IGNORECASE),
      "hints at what another reader said"),
-    (re.compile(r"\bscor(?:e|es|ed|ing)\b|\bprobabilit|\blikelihood\b|\bconfiden|\b0?\.\d+\b", re.IGNORECASE),
-     "mentions a score"),
-    (re.compile(r"%|\bper ?cent", re.IGNORECASE), "mentions a percentage"),
     (re.compile(r"\bmeasur|\bdiameter|\bdimensions?\b|\bhow (?:big|large)\b|\bwhat size\b|\bsize of\b"
                 r"|\d\s*(?:mm|cm)\b|\bmillimet|\bcentimet", re.IGNORECASE), "asks for a measurement"),
+    (re.compile(r"\bscor(?:e|es|ed|ing)\b|\bprobabilit|\blikelihood\b|\bconfiden|\bcertain(?:ty)?\b|\b0?\.\d+\b", re.IGNORECASE),
+     "mentions a score"),
+    (re.compile(r"%|\bper ?cent", re.IGNORECASE), "mentions a percentage"),
     (re.compile(r"\bprior\b|\bprevious\b|\binterval\b|\bcompared (?:to|with) (?:the )?(?:prior|previous|earlier|last)"
-                r"|\bstable\b|\bnew\b|\bgrown\b|\bgrowth\b|\bsince\b|\bchanged?\b", re.IGNORECASE),
+                r"|\bstable\b|\bnew\b|\bgrown\b|\bgrowth\b|\bsince\b|\bchanged?\b"
+                r"|\bunchanged\b|\bgrowing\b|\bgrew\b|\bprogress(?:ion|ed|ing)?\b|\bnewly\b|\bresolv\w*"
+                r"|\bresolution\b|\bmissed\b|\benlarging\b|\blarger than before\b"
+                r"|\bhas\s+(?:\w+\s+){1,3}(?:enlarged|increased|decreased)\b", re.IGNORECASE),
      "mentions a prior scan"),
 ]
 
@@ -146,7 +149,7 @@ ORGAN_STEMS = {
     "Liver": ("hepat",),
     "Spleen": ("splen",),
     "Kidney": ("nephr", "hydroneph"),
-    "Lung": ("pneum", "atelecta"),
+    "Lung": ("pneumon", "pneumothora", "atelecta"),
     "Gallbladder": ("cholecyst",),
     "Heart": ("pericardi",),
     "Rib": ("costal",),
