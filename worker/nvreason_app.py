@@ -39,6 +39,7 @@ from radar_worker.nvreason import (
     REVISION,
     SCALEDOWN_S,
     crop_summary,
+    is_input_error,
     split_output,
 )
 from radar_worker.volume import VOLUME_SCHEME, volume_path
@@ -231,6 +232,8 @@ class NvReason:
         try:
             path = self.fetch(source_ref)
         except (TransferError, FileNotFoundError, ValueError) as err:
+            if not is_input_error(err):
+                raise  # network and 5xx: the caller decides
             log(f"could not read the scan: {err}")
             return error_result(job_id, "input_error", str(err))
         download_s = time.perf_counter() - t0

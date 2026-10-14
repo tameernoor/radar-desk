@@ -17,6 +17,7 @@ from radar_worker.nvreason import (
     REPORT_PROMPT,
     REVISION,
     crop_summary,
+    is_input_error,
     split_output,
 )
 
@@ -106,3 +107,15 @@ def test_nvreason_app_takes_the_volume_helpers_from_radar_worker():
     imported = {a.name for node in tree.body if isinstance(node, ast.ImportFrom)
                 and node.module == "radar_worker.volume" for a in node.names}
     assert {"VOLUME_SCHEME", "volume_path"} <= imported
+
+
+def test_only_the_scans_own_failures_are_input_errors():
+    from radar_worker.io import TransferError
+
+    assert is_input_error(TransferError(404, "gone"))
+    assert is_input_error(TransferError(403, "expired"))
+    assert not is_input_error(TransferError(0, "connection reset"))
+    assert not is_input_error(TransferError(503, "slow down"))
+    assert is_input_error(FileNotFoundError("volume://x"))
+    assert is_input_error(ValueError("bad ref"))
+    assert not is_input_error(RuntimeError("crop offset"))

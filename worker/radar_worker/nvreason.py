@@ -46,3 +46,13 @@ def crop_summary(box_lo_mm, box_hi_mm, offset_vox, nz: int, spacing_mm: float, f
         "cut_above_mm": round(max(0, nz - z0 - CROP) * spacing_mm, 1),
         "fallback": bool(fallback),
     }
+
+
+def is_input_error(err: Exception) -> bool:
+    """Whether a failed fetch is the scan's fault, as radar_worker.job.run_job decides it: a refused or expired URL
+    (HTTP 4xx), a missing volume object or a bad reference. Network errors (status 0) and 5xx are not; they re-raise."""
+    from radar_worker.io import TransferError
+
+    if isinstance(err, TransferError):
+        return 400 <= err.status < 500
+    return isinstance(err, (FileNotFoundError, ValueError))
