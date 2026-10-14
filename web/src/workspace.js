@@ -9,6 +9,8 @@ import { wireLogout } from "./login.js";
 import { registerPageTools } from "./pagetools.js";
 import { organCss, UNSCORED_GREY } from "./palette.js";
 import { recipeFor } from "./recipes.js";
+import { isBusy } from "./readers.js";
+import { createReadersView } from "./readersview.js";
 import { mountReport } from "./report.js";
 import { createViewer, rawBytes, tooBig, WINDOWS } from "./viewer.js";
 
@@ -28,6 +30,9 @@ const ws = {
   activeOrgan: null,
   activeFinding: null,
   boxOn: false,
+  readers: null, // GET /scans/{id}/readers
+  readersView: null,
+  nvViewOn: false,
   viewer: null,
   findings: null,
   catalog: [],
@@ -245,6 +250,7 @@ function syncControls(from = null) {
   press("[data-outline]", v.outline);
   for (const input of document.querySelectorAll("[data-mask-opacity]")) if (input !== from) input.value = String(Math.round(v.mask_opacity * 100));
   press("#box-toggle", ws.boxOn);
+  press("#nv-view-toggle", ws.nvViewOn);
   const viewFor = $("view-for");
   viewFor.textContent = viewFor.title = `View for ${ws.activeOrgan ?? "organ"}`;
   viewFor.classList.toggle("muted", !ws.activeOrgan);
@@ -476,9 +482,77 @@ async function loadMask(job) {
     const present = await ws.viewer.loadMask(`/jobs/${job.id}/mask.nii.gz`, ws.labels, ws.scoredOrgans);
     renderLegend(present);
     if (ws.boxOn && ws.activeOrgan) showScoringBox(ws.activeOrgan, true);
+    if (ws.nvViewOn) toggleNvView(true);
   } catch {
     notice("No mask for this job. Showing the CT only.");
   }
+}
+
+// ---------- readers ----------
+
+let readersTimer = null;
+
+async function loadReaders() {
+  clearTimeout(readersTimer);
+  try {
+    ws.readers = await get(`/scans/${encodeURIComponent(ws.scan.id)}/readers`);
+  } catch (e) {
+    if (!(e instanceof ApiError && e.status === 401)) ws.readersView.setError(`Could not load the readers: ${e.message}`);
+    return;
+  }
+  ws.readersView.setView(ws.readers);
+  if (isBusy(ws.readers)) readersTimer = setTimeout(loadReaders, 5000);
+}
+
+async function runNv() {
+  try {
+    await post(`/scans/${encodeURIComponent(ws.scan.id)}/nvreason`);
+  } catch (e) {
+    notice(`Could not start NV-Reason-CT: ${e.message}`);
+  }
+  loadReaders();
+}
+
+async function retryReads() {
+  try {
+    await post(`/scans/${encodeURIComponent(ws.scan.id)}/readers/refresh`);
+  } catch (e) {
+    notice(`Could not retry: ${e.message}`);
+  }
+  loadReaders();
+}
+
+// The Readers tab hides RADAR's list and its controls; the display line stays, since the dots follow it.
+function showTab(name) {
+  const readers = name === "readers";
+  $("tab-findings").setAttribute("aria-selected", String(!readers));
+  $("tab-readers").setAttribute("aria-selected", String(readers));
+  for (const node of [$("organ-strip"), $("findings"), ...document.querySelectorAll(".strip-key, .findings-controls")]) node.hidden = readers;
+  $("readers").hidden = !readers;
+  if (readers) loadReaders();
+}
+
+// NV-Reason-CT's crop box, drawn like the scoring box. It needs RADAR's mask in the viewer and NV's crop.
+function toggleNvView(on) {
+  const next = on ?? !ws.nvViewOn;
+  if (!next) {
+    ws.viewer.showNvBox(null);
+    ws.nvViewOn = false;
+    syncControls();
+    return { ok: true, on: false };
+  }
+  const box = ws.readers?.nv?.crop?.box_mm;
+  if (!box) {
+    notice("NV-Reason-CT has not read this scan yet, so there is no view to draw.");
+    return { ok: false, reason: "no crop" };
+  }
+  if (!ws.viewer.showNvBox(box)) {
+    notice("NV's view needs RADAR's mask in the viewer, which is not loaded.");
+    return { ok: false, reason: "no mask" };
+  }
+  ws.nvViewOn = true;
+  syncControls();
+  return { ok: true, on: true, box_mm: box };
 }
 
 // ---------- CT ----------
@@ -625,6 +699,9 @@ function wireToolbar() {
   $("zoom-in").addEventListener("click", () => ws.viewer.zoomBy(1));
   $("zoom-out").addEventListener("click", () => ws.viewer.zoomBy(-1));
   $("view-reset").addEventListener("click", () => ws.viewer.resetView());
+  $("nv-view-toggle").addEventListener("click", () => toggleNvView());
+  $("tab-findings").addEventListener("click", () => showTab("findings"));
+  $("tab-readers").addEventListener("click", () => showTab("readers"));
   $("box-toggle").addEventListener("click", () => {
     if (!ws.activeOrgan) return notice("Select a finding or an organ first.");
     showScoringBox(ws.activeOrgan, !ws.boxOn);
@@ -717,7 +794,9 @@ async function main() {
   ws.findings = createFindings({
     onSelect: (key) => selectFinding(key),
     onOrgan: (organ, { toggle = true } = {}) => (toggle ? toggleOrgan(organ) : jumpToOrgan(organ)),
+    onThreshold: (percent) => ws.readersView?.setThreshold(percent),
   });
+  ws.readersView = createReadersView({ root: $("readers"), onOrgan: (organ) => jumpToOrgan(organ), onRetryReads: retryReads, onRunNv: runNv });
   ws.findings.setCatalog(catalog.findings, labels.scored_organs);
   ws.catalog = catalog.findings;
   ws.viewer = createViewer($("viewer"), {
@@ -730,7 +809,7 @@ async function main() {
   });
 
   renderScanBar(scan);
-  ws.report = mountReport({ scanId: scan.id, onChange: () => {} });
+  ws.report = mountReport({ scanId: scan.id, onChange: loadReaders });
   ws.report.load().catch(() => {});
   wireToolbar();
   wireKeys();
@@ -740,7 +819,7 @@ async function main() {
   ws.chat = mountChat({ target: "#workspace-main", context: () => ({ scan_id: ws.scan.id, job_id: ws.job?.id ?? null }) });
   const actions = { viewState, jumpToOrgan, selectFinding, setWindow, setWindowLevel, setThreshold, showScoringBox, toggleMask, toggleFocus, setZoom, setViewFor, setLight };
   const tools = await registerPageTools(actions);
-  window.__radar = { ...actions, toggleLight, resetLight, tools, viewer: ws.viewer };
+  window.__radar = { ...actions, toggleLight, resetLight, tools, toggleNvView, viewer: ws.viewer };
 
   if (scan.state !== "ready") {
     setJobStatus(scan.state === "rejected" ? `Rejected: ${scan.rejected_reason}` : "Upload not finished", "state-failed");
@@ -748,6 +827,7 @@ async function main() {
     return;
   }
   offerCT();
+  loadReaders();
   if (!scan.latest_job) return renderJob(null);
   // While the latest job is not done, show the newest done one (the chat falls back the same way).
   if (scan.latest_job.state !== "done") {

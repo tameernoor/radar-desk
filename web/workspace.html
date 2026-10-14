@@ -28,6 +28,10 @@
     <div class="stage">
       <div id="workspace-main" class="workspace-main">
         <aside class="findings-pane" aria-label="Findings">
+          <div class="pane-tabs" role="tablist" aria-label="Findings pane">
+            <button type="button" role="tab" id="tab-findings" aria-selected="true" aria-controls="findings">RADAR findings</button>
+            <button type="button" role="tab" id="tab-readers" aria-selected="false" aria-controls="readers">Readers</button>
+          </div>
           <div class="organ-strip" id="organ-strip" aria-label="Organ coverage"></div>
           <div class="strip-key muted">
             <span><i class="key key-window"></i>scored in a window</span>
@@ -49,6 +53,7 @@
             <p class="threshold-note">RADAR ships no calibrated thresholds; this line is for display. A score is not urgency.</p>
           </div>
           <div class="findings-list" id="findings" tabindex="-1"></div>
+          <div class="readers" id="readers" role="tabpanel" aria-labelledby="tab-readers" hidden></div>
         </aside>
         <section class="viewer-pane" aria-label="Viewer">
           <div class="viewer-toolbar" id="viewer-toolbar">
@@ -69,6 +74,7 @@
             <div class="btn-group" role="group" aria-label="Mask">
               <button type="button" id="mask-toggle" data-mask title="Mask on or off (space)" aria-pressed="true">Mask</button>
               <button type="button" id="box-toggle" aria-pressed="false" title="Where RADAR looked for the selected organ">Scoring box</button>
+              <button type="button" id="nv-view-toggle" aria-pressed="false" title="The part of the scan NV-Reason-CT reads">NV's view</button>
               <button type="button" id="view-for" class="muted" title="View for organ">View for organ</button>
               <button type="button" id="show-all" title="Show every organ in the mask">All organs</button>
             </div>

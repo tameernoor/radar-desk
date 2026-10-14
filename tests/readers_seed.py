@@ -47,3 +47,8 @@ NV_READ = read_reply(
     },
     [],
 )
+
+
+def scripted_replies() -> list[str]:
+    """The chat model's replies for one full refresh, in the order the refresh asks: report read, NV read."""
+    return [REPORT_READ, NV_READ]

@@ -10,7 +10,7 @@ function howText(how) {
   return HOW_TEXT[how.how] || how.how;
 }
 
-export function createFindings({ onSelect, onOrgan }) {
+export function createFindings({ onSelect, onOrgan, onThreshold }) {
   const listEl = document.getElementById("findings");
   const stripEl = document.getElementById("organ-strip");
   const sortEl = document.getElementById("sort");
@@ -158,6 +158,7 @@ export function createFindings({ onSelect, onOrgan }) {
     thresholdEl.value = String(state.threshold);
     thresholdOut.textContent = `${state.threshold}%`;
     renderList();
+    onThreshold?.(state.threshold);
   }
 
   thresholdEl.addEventListener("input", () => setThreshold(Number(thresholdEl.value)));
