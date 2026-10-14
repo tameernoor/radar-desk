@@ -74,3 +74,22 @@ test("readers tab: rows, flags, fold, display line, words, jump, NV's view", asy
   await page.getByRole("tab", { name: "RADAR findings" }).click();
   await expect(page.locator('#findings[data-ready="true"] .finding')).toHaveCount(146, { timeout: 30_000 });
 });
+
+test("readers tab: a prepared question asks NV-Reason-CT and its answer shows in the row", async ({ page }) => {
+  await login(page);
+  const scan = await seededScan(page);
+  const view = await (await page.request.get(`/scans/${scan.id}/readers`)).json();
+  const q = view.rows.find((r) => r.id === "ascites").queries.find((x) => x.kind === "yes_no");
+  expect(q, "a seeded yes/no question for ascites").toBeTruthy();
+
+  await page.goto(`/workspace.html?scan=${encodeURIComponent(scan.id)}`);
+  await page.getByRole("tab", { name: "Readers" }).click();
+  const readers = page.locator('#readers[data-ready="true"]');
+  await expect(readers.locator(".rgeneral .rchip")).toHaveCount(view.queries.general.length);
+  await readers.locator('.rrow[data-row="ascites"] .rexpand').click();
+  await readers.locator(`.rchip[data-query="${q.id}"]`).click();
+  await expect(readers.getByText("NV's answer differs from its report").first()).toBeVisible({ timeout: 30_000 });
+  await expect(readers.locator(".rasked").first()).toContainText("NV: Yes.");
+  // The dot stays the report read.
+  await expect(readers.locator('.rrow[data-row="ascites"] [data-reader="nv"]')).toHaveAttribute("data-state", "absent");
+});

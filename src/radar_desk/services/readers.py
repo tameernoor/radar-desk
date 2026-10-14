@@ -22,9 +22,10 @@ import numpy as np
 from radar_desk.radar import catalog
 from radar_desk.readers.labels import LABELS, LABELS_SHA256
 from radar_desk.readers.prompts import QUERY_PROMPT_SHA, READ_PROMPT_SHA
-from radar_desk.readers.reading import read_text, write_queries
+from radar_desk.readers.reading import norm, read_text, write_queries
 from radar_desk.records import now_iso
 from radar_desk.services.blobs import read_bytes, read_json, write_json
+from radar_desk.services.errors import ServiceError
 
 log = logging.getLogger(__name__)
 
@@ -395,3 +396,18 @@ class ReadersService:
             "queries": {**status["queries"], "general": [q for q in queries if q["label"] is None]},
             "other_mentions": others,
         }
+
+    def ask(self, scan_id: str, question: str | None = None, query_id: str | None = None) -> dict:
+        """Ask NV-Reason-CT a prepared question (by id) or a free one. A free question with the same words as a
+        prepared one counts as that one, so its answer shows in the question's row."""
+        self.scans.get(scan_id)
+        prepared = self.queries(self.plan(scan_id))
+        if query_id:
+            q = next((q for q in prepared if q["id"] == query_id), None)
+            if q is None:
+                raise ServiceError(404, f"no prepared question {query_id}")
+            return self.nvreason.ask(scan_id, q["text"], label=q["label"])
+        if not question or not question.strip():
+            raise ServiceError(422, "give a question or a query_id")
+        label = next((q["label"] for q in prepared if norm(q["text"]) == norm(question)), None)
+        return self.nvreason.ask(scan_id, question, label=label)

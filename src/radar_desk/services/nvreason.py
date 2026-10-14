@@ -17,6 +17,7 @@ from collections.abc import Callable
 from typing import Any
 
 from radar_desk.gpu.backend import Errored, Finished, Pending
+from radar_desk.gpu.nvreason_backend import NvAskTimeout
 from radar_desk.records import Job, JobError, Timings, new_id
 from radar_desk.services.blobs import read_bytes, read_json, replace_bytes, write_json
 from radar_desk.services.costs import gpu_type_from_device, iso_at, parse_iso, price_per_s
@@ -36,6 +37,9 @@ NV_CLASS_TIMEOUT_S = 1200  # the class's timeout
 NV_STUCK_S = 2 * NV_CLASS_TIMEOUT_S + NV_SCALEDOWN_S
 NV_ASK_TIMEOUT_S = 240  # a cold question: model load about 70 s plus the answer
 NV_GPU = "L4"
+NV_YES_NO_TOKENS = 16  # a Yes/No answer, thinking off, as in the smoke runs
+NV_ANSWER_TOKENS = 2048
+COLD_NOTICE = "Waking NV-Reason-CT, about 2 minutes."
 NV_MODES = ("modal", "fake")
 URL_TTL_S = 12 * 60 * 60
 ACTIVE = ("queued", "submitted")
@@ -50,6 +54,20 @@ def nv_keys(job_id: str) -> dict[str, str]:
 
 def qa_key(job_id: str) -> str:
     return f"jobs/{job_id}/qa.jsonl"
+
+
+def conversation_messages(report_text: str, history: list[dict], question: str) -> list[dict]:
+    """NVIDIA's conversation shape: the image with the report prompt, NV-Reason-CT's own report, each earlier question
+    and answer of this conversation, then the new question. One scan and one region per conversation."""
+    messages = [
+        {"role": "user", "content": [{"type": "image"}, {"type": "text", "text": NV_REPORT_PROMPT}]},
+        {"role": "assistant", "content": [{"type": "text", "text": report_text}]},
+    ]
+    for entry in history:
+        messages.append({"role": "user", "content": [{"type": "text", "text": entry["question"]}]})
+        messages.append({"role": "assistant", "content": [{"type": "text", "text": entry["answer"]}]})
+    messages.append({"role": "user", "content": [{"type": "text", "text": question}]})
+    return messages
 
 
 class NvReasonService:
@@ -278,3 +296,64 @@ class NvReasonService:
             if isinstance(entry, dict):
                 out.append(entry)
         return out
+
+    # Questions
+
+    def cold_start_notice(self, scan_id: str) -> str | None:
+        """The chat line shown before a question that has to wake the model first, or None."""
+        if self.unavailable() or self.latest_done(scan_id) is None or self.warm():
+            return None
+        return COLD_NOTICE
+
+    def ask(self, scan_id: str, question: str, label: str | None = None) -> dict:
+        """Ask NV-Reason-CT one question about the scan, as a follow-up to its own report, and log it to qa.jsonl.
+        A question ending "Answer only Yes or No." runs with thinking off and 16 new tokens, others with thinking."""
+        question = question.strip()
+        if not question:
+            raise ServiceError(422, "the question is empty")
+        why = self.unavailable()
+        if why:
+            raise ServiceError(409, why)
+        job = self.latest_done(scan_id)
+        if job is None:
+            raise ServiceError(409, "NV-Reason-CT has not read this scan yet")
+        report = self.report(job.id) or {}
+        if not isinstance(report.get("text"), str):
+            raise ServiceError(409, "NV-Reason-CT's report for this scan is missing")
+        backend = self.backend()
+        started = self.clock()
+        if getattr(backend, "priced", True) and not self.costs.budget_allows_now(started, "modal"):
+            raise ServiceError(409, "the monthly GPU budget is used up")
+        conversation = f"{job.id}:{NV_REGION}"
+        history = [e for e in self.qa_entries(job.id) if e.get("conversation") == conversation]
+        yes_no = question.endswith(NV_YES_NO_SUFFIX)
+        warm = self.warm(started)
+        source = self.storage.worker_ref(source_key(scan_id), "GET", URL_TTL_S)
+        try:
+            out = backend.ask(source, NV_REGION, conversation_messages(report["text"], history, question),
+                              not yes_no, NV_YES_NO_TOKENS if yes_no else NV_ANSWER_TOKENS, NV_ASK_TIMEOUT_S)
+        except NvAskTimeout as exc:
+            raise ServiceError(504, str(exc)) from None
+        except Exception as exc:  # noqa: BLE001 - shown to the user, nothing is logged
+            raise ServiceError(502, f"NV-Reason-CT failed: {type(exc).__name__}: {exc}") from None
+        finished = self.clock()
+        self._last_gpu_at = finished
+        entry = {
+            "conversation": conversation,
+            "question": question,
+            "answer": str(out.get("answer") or "").strip(),
+            "thinking": str(out.get("thinking") or ""),
+            "seconds": round(finished - started, 2),
+            "warm": "warm" if warm else "cold",
+            "label": label,
+            "asked_at": iso_at(finished),
+        }
+        self._append_qa(job.id, entry)
+        return {**entry, "job_id": job.id}
+
+    def _append_qa(self, job_id: str, entry: dict) -> None:
+        """One line per question. Under a lock, so two questions at once both land."""
+        line = (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8")
+        with self._qa_lock:
+            data = read_bytes(self.storage, qa_key(job_id)) or b""
+            replace_bytes(self.storage, qa_key(job_id), data + line, "application/x-ndjson")

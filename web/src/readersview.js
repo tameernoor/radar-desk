@@ -7,8 +7,8 @@ import { arrange, foldText, KEY, nvPendingOf, STATE_TEXT, SYMBOL } from "./reade
 const NAMES = { report: "Report", radar: "RADAR", nv: "NV" };
 const HOLDS = { needs_modal: "needs Modal compute", budget: "over the monthly GPU budget", spawn_error: "could not start, trying again" };
 
-export function createReadersView({ root, onOrgan, onRetryReads, onRunNv }) {
-  const state = { view: null, threshold: 50, open: new Set(), foldOpen: false, othersOpen: false, error: null };
+export function createReadersView({ root, onOrgan, onRetryReads, onRunNv, onAsk, onAskChat }) {
+  const state = { view: null, threshold: 50, open: new Set(), foldOpen: false, othersOpen: false, error: null, asking: new Set(), askError: null };
 
   // No Report column without a report, no NV column when NV cannot run and never did.
   const readers = () => {
@@ -63,6 +63,32 @@ export function createReadersView({ root, onOrgan, onRetryReads, onRunNv }) {
     return el("p", {}, el("strong", {}, `${label}: `), claim ? `${STATE_TEXT[read.state]}, no quote` : STATE_TEXT[read.state]);
   }
 
+  async function ask(q) {
+    state.asking.add(q.id);
+    state.askError = null;
+    render();
+    try {
+      await onAsk(q.id);
+    } catch (e) {
+      state.askError = `Could not ask NV-Reason-CT: ${e.message}`;
+    } finally {
+      state.asking.delete(q.id);
+      render();
+    }
+  }
+
+  function chip(q) {
+    const busy = state.asking.has(q.id);
+    const waiting = state.view.nv.warm ? "Asking NV-Reason-CT…" : "Waking NV-Reason-CT, about 2 minutes…";
+    return el("button", { type: "button", class: "rchip", "data-query": q.id, disabled: state.asking.size > 0, title: "Ask NV-Reason-CT this question", onclick: (e) => (e.stopPropagation(), ask(q)) }, busy ? waiting : q.text);
+  }
+
+  function general(view) {
+    const items = view.queries?.general || [];
+    if (!items.length) return [];
+    return [el("div", { class: "rgeneral" }, el("p", { class: "muted small" }, "Ask NV-Reason-CT in the chat:"), items.map((q) => el("button", { type: "button", class: "rchip", "data-query": q.id, onclick: () => onAskChat(q.text) }, q.text)))];
+  }
+
   function details(row) {
     const parts = [];
     if (state.view.has_report) parts.push(words("Report", row.report, "not read yet"));
@@ -76,6 +102,7 @@ export function createReadersView({ root, onOrgan, onRetryReads, onRunNv }) {
         el("p", { class: "rasked" }, el("strong", {}, "Asked NV: "), a.question, el("br"), `NV: ${a.answer ?? "no answer"}`, a.differs ? el("span", { class: "rdiffers" }, ". NV's answer differs from its report") : null),
       );
     }
+    if (row.queries?.length) parts.push(el("div", { class: "rchips" }, row.queries.map(chip)));
     return el("div", { class: "rdetails" }, parts);
   }
 
@@ -136,7 +163,16 @@ export function createReadersView({ root, onOrgan, onRetryReads, onRunNv }) {
     const intro = view.has_report
       ? "The radiologist report, RADAR and NV-Reason-CT on the same scan. None of them is treated as right."
       : "RADAR and NV-Reason-CT on the same scan. None of them is treated as right. Add a report to compare a third reader.";
-    const parts = [el("p", { class: "rintro muted small" }, intro), ...header(view), ...[...flagged, ...positive, ...waiting].flatMap(rowNodes), ...fold(folded), ...others(view), legend()];
+    const parts = [
+      el("p", { class: "rintro muted small" }, intro),
+      state.askError ? el("p", { class: "rretry" }, state.askError) : null,
+      ...header(view),
+      ...[...flagged, ...positive, ...waiting].flatMap(rowNodes),
+      ...fold(folded),
+      ...others(view),
+      ...general(view),
+      legend(),
+    ];
     root.replaceChildren(...parts.filter(Boolean));
     root.dataset.ready = "true";
   }
@@ -145,6 +181,7 @@ export function createReadersView({ root, onOrgan, onRetryReads, onRunNv }) {
     setView(view) {
       state.view = view;
       state.error = null;
+      state.askError = null;
       render();
     },
     setError(message) {

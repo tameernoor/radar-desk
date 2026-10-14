@@ -24,6 +24,7 @@ from radar_desk.records import ChatExecution, new_id
 log = logging.getLogger(__name__)
 
 MAX_LLM_CALLS = 8
+KEEPALIVE_S = 15.0  # an SSE comment this often while a server tool runs, so proxies keep the stream open
 CAP_TEXT = "I stopped after too many tool steps in this conversation. Ask again to continue."
 
 
@@ -102,6 +103,17 @@ def _tool_output_text(output: Any) -> tuple[str, bool]:
     return _text_of(output.get("content")), bool(output.get("isError"))
 
 
+def _notice(spec: ToolSpec | None, services: Any, arguments: Any) -> str | None:
+    """The tool's line for the chat before it runs (such as a cold start), or None. Never raises."""
+    if spec is None or spec.notice is None or not isinstance(arguments, dict):
+        return None
+    try:
+        return spec.notice(services, arguments)
+    except Exception:
+        log.exception("chat: the notice of tool %s failed", spec.name)
+        return None
+
+
 class ChatAgent:
     def __init__(
         self,
@@ -111,11 +123,13 @@ class ChatAgent:
         max_llm_calls: int = MAX_LLM_CALLS,
         emitter_options: dict | None = None,
         status: StatusCache | None = None,
+        keepalive_s: float = KEEPALIVE_S,
     ) -> None:
         self.services = services
         self.status = status if status is not None else StatusCache(services.settings)
         self.llm = llm
         self.tools = tools
+        self.keepalive_s = keepalive_s
         self.max_llm_calls = max_llm_calls
         self.emitter_options = emitter_options or {}
         self._server_names = {t.name for t in tools}
@@ -238,10 +252,19 @@ class ChatAgent:
                     if call.name in page_names:
                         page_calls.append(call)
                         continue
+                    note = _notice(next((t for t in self.tools if t.name == call.name), None),
+                                   self.services, call.arguments)
+                    if note:
+                        yield emitter.text_delta(note + "\n\n")
                     yield emitter.tool_start(call.id, call.name, call.arguments)
-                    result = await asyncio.to_thread(
+                    task = asyncio.ensure_future(asyncio.to_thread(
                         run_tool, self.services, call.name, call.arguments, self.tools
-                    )
+                    ))
+                    while not task.done():
+                        await asyncio.wait({task}, timeout=self.keepalive_s)
+                        if not task.done():
+                            yield ": keepalive\n\n"
+                    result = task.result()
                     yield emitter.tool_complete(call.id, not is_error(result), result)
                     messages.append(
                         {"role": "tool", "tool_call_id": call.id, "content": json.dumps(result, ensure_ascii=False)}

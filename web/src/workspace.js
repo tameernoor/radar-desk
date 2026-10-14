@@ -664,6 +664,14 @@ function askChat() {
   if (!ws.chat.submitMessage(LOOK_QUESTION)) notice("The chat could not send right now; try again.");
 }
 
+// A general prepared question goes to the chat, which asks NV-Reason-CT through its tool and quotes the answer.
+function askNvInChat(text) {
+  if (!ws.chat) return notice("The chat is not available.");
+  toggleFocus(false);
+  ws.chat.open();
+  if (!ws.chat.submitMessage(`Ask NV-Reason-CT: ${text}`)) notice("The chat could not send right now; try again.");
+}
+
 // ---------- wiring ----------
 
 let sliderSource = null; // the slider whose input event is being handled, see dragging()
@@ -800,7 +808,17 @@ async function main() {
     onOrgan: (organ, { toggle = true } = {}) => (toggle ? toggleOrgan(organ) : jumpToOrgan(organ)),
     onThreshold: (percent) => ws.readersView?.setThreshold(percent),
   });
-  ws.readersView = createReadersView({ root: $("readers"), onOrgan: (organ) => jumpToOrgan(organ), onRetryReads: retryReads, onRunNv: runNv });
+  ws.readersView = createReadersView({
+    root: $("readers"),
+    onOrgan: (organ) => jumpToOrgan(organ),
+    onRetryReads: retryReads,
+    onRunNv: runNv,
+    onAsk: async (queryId) => {
+      await post(`/scans/${encodeURIComponent(ws.scan.id)}/nvreason/ask`, { query_id: queryId });
+      await loadReaders();
+    },
+    onAskChat: askNvInChat,
+  });
   ws.findings.setCatalog(catalog.findings, labels.scored_organs);
   ws.catalog = catalog.findings;
   ws.viewer = createViewer($("viewer"), {

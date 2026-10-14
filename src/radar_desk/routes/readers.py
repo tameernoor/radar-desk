@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
+from pydantic import BaseModel
 
 from radar_desk.routes import OWNER, Svc
 
@@ -27,3 +28,14 @@ def refresh_readers(scan_id: str, svc: Svc) -> dict:
 def get_readers(scan_id: str, svc: Svc) -> dict:
     """The Readers tab: one row per label with the report, RADAR and NV-Reason-CT side by side."""
     return svc.readers.view(scan_id)
+
+
+class AskBody(BaseModel):
+    question: str | None = None
+    query_id: str | None = None
+
+
+@router.post("/{scan_id}/nvreason/ask")
+def ask_nvreason(scan_id: str, body: AskBody, svc: Svc) -> dict:
+    """Ask NV-Reason-CT one question, prepared (query_id) or free. Waits for the answer, up to 4 minutes cold."""
+    return svc.readers.ask(scan_id, question=body.question, query_id=body.query_id)

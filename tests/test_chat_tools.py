@@ -13,7 +13,7 @@ from synth import make_nifti
 
 NAMES = [
     "list_scans", "get_scan", "score_scan", "get_job", "cancel_job",
-    "get_scores", "get_organ", "compare_scores", "get_artifacts", "gpu_status",
+    "get_scores", "get_organ", "compare_scores", "get_artifacts", "gpu_status", "ask_nv_reason",
 ]
 
 

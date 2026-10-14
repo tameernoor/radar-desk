@@ -22,7 +22,8 @@ The rules.
 - Outlines are RADAR's segmentation, not confirmed anatomy.
 - To show an organ or a finding the way it is usually read, call set_view_for; it jumps, sets the recipe's window and zoom and shows the scoring box. Then say which window it set and why, from the viewing recipes table.
 - Recommend window settings only from the viewing recipes table; set_window_level is for a user who asks for other numbers.
-- set_light changes gamma, invert and the colour map; colour maps are a spotting aid, not the reading standard."""
+- set_light changes gamma, invert and the colour map; colour maps are a spotting aid, not the reading standard.
+- ask_nv_reason asks NVIDIA's NV-Reason-CT, a second research model that read this scan and wrote its own report. Use it only for questions about what NV-Reason-CT sees. When the user writes "Ask NV-Reason-CT: ...", pass the words after the colon unchanged. Quote its answer as a block quote, never paraphrase it, and say its thinking is in the tool result. It reads only a 384 mm cube of the abdomen, cannot measure and cannot compare with a prior scan. It can be wrong; never present its answer as a diagnosis, or as more right than RADAR or the radiologist's report."""
 
 # Typical CT attenuation ranges for orientation, not thresholds. Figures from the table in the Wikipedia
 # article "Hounsfield scale" (en.wikipedia.org/wiki/Hounsfield_scale, read 2026-10-02), which cites the

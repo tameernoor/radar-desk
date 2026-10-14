@@ -309,3 +309,9 @@ body.focus .viewer-notice:not(.viewer-prompt) { top: calc(var(--toolbar-h, 2.5re
 .rkey { position: sticky; bottom: 0; background: var(--panel); margin: 0; padding: 0.3rem 0; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 0.15rem 0.8rem; }
 .rkey span { white-space: nowrap; }
 .rretry { color: var(--warn); }
+
+.rchips, .rgeneral { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0.3rem 0; }
+.rgeneral { margin-top: 0.6rem; }
+.rgeneral p { flex-basis: 100%; margin: 0; }
+.rchip { background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; color: var(--text); padding: 0.15rem 0.6rem; font-size: 0.8rem; text-align: left; }
+.rchip:disabled { color: var(--muted); }
