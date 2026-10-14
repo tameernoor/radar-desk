@@ -153,13 +153,14 @@ class ScanService:
         )
 
     def delete(self, scan_id: str) -> None:
-        """Remove the source object and the scan record. Refused while a job for the scan is queued or
+        """Remove the source object, the report and the scan record. Refused while a job for the scan is queued or
         running. In v1 the scan's jobs, results and job artefacts are kept."""
         self.get(scan_id)
         active = [j for j in self.db.jobs_for_scan(scan_id, kind=None) if j.state in ("queued", "submitted")]
         if active:
             raise ServiceError(409, f"job {active[0].id} is {active[0].state}; cancel it first")
         self.storage.delete(source_key(scan_id))
+        self.storage.delete(report_key(scan_id))
         self.db.delete_scan(scan_id)
 
     def view_url(self, scan_id: str) -> str:

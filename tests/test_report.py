@@ -6,6 +6,7 @@ import pytest
 
 from api_client import api_client
 from radar_desk.services import ServiceError
+from radar_desk.services.blobs import read_bytes
 from radar_desk.services.scans import REPORT_MAX_CHARS, clean_report, report_key
 from test_chat_tools import ready_scan
 
@@ -73,3 +74,18 @@ def test_report_routes(make_services, tmp_path):
     assert client.put(f"/scans/{scan.id}/report", json={"text": "  "}).status_code == 422
     assert client.delete(f"/scans/{scan.id}/report").status_code == 204
     assert client.get(f"/scans/{scan.id}/report").status_code == 404
+
+
+def test_deleting_a_scan_removes_its_report(make_services, tmp_path):
+    from fake_volume import FakeVolume
+    from radar_desk.storage.modal_volume import ModalVolumeStorage
+
+    for svc in (
+        make_services(),
+        make_services(storage=ModalVolumeStorage("radar-data", "http://127.0.0.1:8000", volume=FakeVolume()),
+                      storage_backend="modal_volume"),
+    ):
+        scan = ready_scan(svc, tmp_path)
+        svc.scans.put_report(scan.id, SYNTHETIC)
+        svc.scans.delete(scan.id)
+        assert read_bytes(svc.storage, report_key(scan.id)) is None
