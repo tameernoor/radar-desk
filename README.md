@@ -1,6 +1,6 @@
 # radar-desk
 
-Runs RADAR (Alibaba DAMO Academy's abdominal CT model, Science 2026) on a CT scan. Shows the 146 finding scores next to the image with RADAR's organ outlines, plus a chat that explains the scores and moves the viewer.
+Runs RADAR (Alibaba DAMO Academy's abdominal CT model, Science 2026) on a CT scan. Shows the 146 finding scores next to the image with RADAR's organ outlines, plus a chat that explains the scores and moves the viewer. Optionally, NVIDIA's NV-Reason-CT reads the same scan and writes its own report, shown next to RADAR's scores and the radiologist's report.
 
 Research use only. Not a medical device.
 
@@ -87,6 +87,8 @@ New worker version: merge, tag `worker-vX.Y`, push the tag, set `WORKER_IMAGE=..
 
 NV-Reason-CT (optional, Modal mode only): NVIDIA's CT model writes its own report of each scan, as a second reader next to RADAR. Deploy `worker/nvreason_app.py` (line above) and set `NVREASON_ENABLED=1`. Scoring a scan then also starts one NV-Reason-CT report on an L4, about 2 minutes including the model load. The first run downloads the model (10.6 GB) into the Modal Volume `nvreason-hf-cache`.
 
+How NV-Reason-CT reads a scan: it sees a 384 mm cube at 2 mm resolution, placed on the abdomen from the base of the lungs down, so the lower pelvis can fall partly outside it. "NV's view" in the viewer shows the cube, and findings in organs mostly outside it are marked. After its report, the chat model reads that report and the radiologist's as a reading radiologist would, and writes follow-up questions NV-Reason-CT can answer about what it sees. The questions never tell it what the report or RADAR said. They are sent only when you press one, on the same L4, which stays up for 5 minutes after the last call and then stops. NV-Reason-CT counts against `GPU_MONTHLY_BUDGET_USD` like RADAR.
+
 ## Results
 
 | Check | Result |
@@ -104,3 +106,5 @@ NV-Reason-CT (optional, Modal mode only): NVIDIA's CT model writes its own repor
 ## Licence
 
 CC BY-NC-SA 4.0 (includes and adapts RADAR's code). Model and weights by Alibaba DAMO Academy, [huggingface.co/radar-generalist/RADAR](https://huggingface.co/radar-generalist/RADAR). Paper: Science 393(6817), eaec6129, doi [10.1126/science.aec6129](https://doi.org/10.1126/science.aec6129). See `LICENSE` and `THIRD_PARTY_LICENSES.md`.
+
+NV-Reason-CT by NVIDIA, [huggingface.co/nvidia/NV-Reason-CT](https://huggingface.co/nvidia/NV-Reason-CT), OpenMDW-1.1 licence, for research and educational use only. Paper: arXiv [2609.27511](https://arxiv.org/abs/2609.27511). The model is downloaded when it first runs, not included here.
