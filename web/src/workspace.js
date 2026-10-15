@@ -542,7 +542,7 @@ async function retryReads() {
   loadReaders();
 }
 
-// The Readers tab hides RADAR's list and its controls; it has its own display line, kept in step through findings.
+// The Readers tab hides RADAR's list and its controls; its present/absent for RADAR follows the display line, kept in step through findings.
 function showTab(name) {
   const readers = name === "readers";
   $("tab-findings").setAttribute("aria-selected", String(!readers));
@@ -827,7 +827,6 @@ async function main() {
     },
     onAddReport: () => ws.report?.open(),
     onOpenReports: openReports,
-    onThreshold: (percent) => ws.findings.setThreshold(percent),
   });
   ws.findings.setCatalog(catalog.findings, labels.scored_organs);
   ws.catalog = catalog.findings;

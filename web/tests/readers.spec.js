@@ -1,6 +1,6 @@
 // The Readers tab, against an isolated server seeded with scripts/seed_dev.py --readers (fake GPU, no chat model).
 import { expect, test } from "@playwright/test";
-import { arrange, foldText } from "../src/readers.js";
+import { foldText, overview } from "../src/readers.js";
 
 const TOKEN = process.env.RADAR_OWNER_TOKEN || "dev-token";
 
@@ -19,7 +19,7 @@ async function seededScan(page) {
 
 test.use({ viewport: { width: 1600, height: 950 } });
 
-test("readers tab: rows, flags, fold, display line, words, jump, NV's view", async ({ page }) => {
+test("readers tab: groups, words, fold, display line, expand, jump, NV's view", async ({ page }) => {
   await login(page);
   const scan = await seededScan(page);
   expect(scan, "a scan seeded with scripts/seed_dev.py --readers").toBeTruthy();
@@ -34,81 +34,98 @@ test("readers tab: rows, flags, fold, display line, words, jump, NV's view", asy
   const readers = page.locator('#readers[data-ready="true"]');
   await expect(readers).toBeVisible();
 
-  // The expected rows come from the same pure functions the page uses, applied to what the server reports.
-  const at50 = arrange(view.rows, { threshold: 50 });
-  await expect(readers.locator(".rrow.flagged")).toHaveCount(at50.flagged.length);
-  await expect(readers.locator('.rrow[data-row="ascites"]')).toHaveClass(/flagged/);
-  await expect(readers.locator('.rrow[data-row="ascites"] [data-reader="report"]')).toHaveAttribute("data-state", "present");
-  await expect(readers.locator('.rrow[data-row="ascites"] [data-reader="nv"]')).toHaveAttribute("data-state", "absent");
-  await expect(readers.locator('.rrow[data-row="ascites"] [data-reader="radar"]')).toHaveAttribute("data-state", "not_scored");
-  await expect(readers.getByText(foldText(at50.folded.length))).toBeVisible();
+  // Gone: the intro, the Reports cards, the Compare section, the slider and the dot legend.
+  await expect(readers.getByText("Three readers of the same scan")).toHaveCount(0);
+  await expect(readers.getByText("Nothing here says who is right")).toHaveCount(0);
+  await expect(readers.getByRole("slider")).toHaveCount(0);
+  await expect(readers.getByRole("heading", { name: "Compare the readers" })).toHaveCount(0);
+  await expect(readers.locator(".rkey")).toHaveCount(0);
+
+  // The expected groups come from the same pure function the page uses, applied to what the server reports.
+  const at50 = overview(view.rows, { threshold: 50 });
+  const group = (key) => readers.locator(`[data-group="${key}"]`);
+  await expect(group("disagree").locator(".rrow")).toHaveCount(at50.disagree.length);
+  await expect(group("disagree").locator(".rrow.flagged")).toHaveCount(at50.disagree.length);
+  const ascites = group("disagree").locator('.rrow[data-row="ascites"]');
+  await expect(ascites).toHaveClass(/flagged/);
+  await expect(ascites).toContainText("NV absent");
+  await expect(ascites).toContainText("Report present");
+  await expect(ascites.locator('[data-reader="radar"]')).toHaveAttribute("data-state", "not_scored");
+  await expect(ascites).not.toContainText(/[●○◌]/);
+  await expect(readers.getByText(foldText(at50.quiet.length))).toBeVisible();
+  if (at50.outside.length) {
+    await expect(group("outside").locator(".rout")).toHaveCount(at50.outside.length);
+    await expect(group("outside").locator(".rout").first()).toContainText("inside NV's view");
+    for (const { row } of at50.outside) {
+      const line = group("outside").locator(`.rout[data-out="${row.id}"]`);
+      if (row.nv.state === "present" || row.nv.state === "absent") await expect(line).toContainText("NV said");
+      else await expect(line).not.toContainText("NV said");
+    }
+  }
+  // Columns line up across groups.
+  // Both measured in one evaluate, polled, since the tab re-renders while the scan loads.
+  if (at50.disagree.length && at50.othersFound.length) {
+    const xs = () => readers.evaluate((root) => ["disagree", "others-found"].map((g) => root.querySelector(`[data-group="${g}"] .rrow .rtitle`)?.getBoundingClientRect().x ?? -1));
+    await expect.poll(async () => { const [a, b] = await xs(); return a > 0 && a === b; }).toBe(true);
+  }
 
   await page.waitForFunction(() => Boolean(window.__radar?.setThreshold)); // the tab can render before the page tools are registered
-  // The display line moves RADAR's dots.
+  // RADAR's display line (on the RADAR tab) moves the Disagree count.
+  await expect(readers.locator('[data-part="display-line"]')).toContainText("now 50%");
   await page.evaluate(() => window.__radar.setThreshold(1));
-  await expect(readers.locator(".rrow.flagged")).toHaveCount(arrange(view.rows, { threshold: 1 }).flagged.length);
+  await expect(readers.locator('[data-part="display-line"]')).toContainText("now 1%");
+  const at1 = overview(view.rows, { threshold: 1 });
+  if (at1.disagree.length) await expect(group("disagree").locator(".rrow")).toHaveCount(at1.disagree.length);
+  else await expect(group("disagree")).toHaveCount(0);
   await page.evaluate(() => window.__radar.setThreshold(50));
-  // The display line sits in the Compare section, not pinned above the tab, and stays in step with the page tools.
-  await expect(page.locator(".threshold")).toBeHidden();
-  await readers.getByRole("slider", { name: "Display line" }).fill("1");
-  await expect(readers.locator(".rrow.flagged")).toHaveCount(arrange(view.rows, { threshold: 1 }).flagged.length);
-  expect(await page.evaluate(() => window.__radar.viewState().threshold_pct)).toBe(1);
-  await page.evaluate(() => window.__radar.setThreshold(50));
-  await expect(readers.getByRole("slider", { name: "Display line" })).toHaveValue("50");
+  await expect(group("disagree").locator(".rrow")).toHaveCount(at50.disagree.length);
 
-  // Each reader in its own words.
-  await readers.locator('.rrow[data-row="ascites"] .rexpand').click();
+  // Each reader in its own words; the click on the row toggles it.
+  await ascites.locator(".rtitle").click();
   await expect(readers.locator(".rdetails")).toContainText('"Small volume ascites in the pelvis."');
   await expect(readers.locator(".rdetails")).toContainText('"No ascites."');
   await readers.getByRole("button", { name: /Other mentions \(1\)/ }).click();
   await expect(readers.getByText('"Degenerative change of the lumbar spine."')).toBeVisible();
 
-  // A row with an organ jumps the viewer.
+  // A click on a row also jumps the viewer to its organ.
   await page.waitForFunction(() => window.__radar?.viewState().mask_loaded === true, null, { timeout: 60_000 });
   await readers.locator('.rrow[data-row="liver_lesion"] .rtitle').click();
   expect(await page.evaluate(() => window.__radar.viewState().active_organ)).toBe("Liver");
+  await ascites.getByRole("button", { name: /Hide details for/ }).click(); // keyboard path, collapses it
+  await expect(readers.locator(".rdetails").filter({ hasText: '"No ascites."' })).toHaveCount(0);
 
   // NV's view draws the crop box.
   await page.getByRole("button", { name: "NV's view" }).click();
   await expect(page.getByRole("button", { name: "NV's view" })).toHaveAttribute("aria-pressed", "true");
   expect(await page.evaluate(() => window.__radar.viewState().nv_view)).toBe(true);
 
-  // Legend items are separate, and the NV column and button exist because the seeded NV job is done.
-  await expect(readers.locator(".rkey > span")).toHaveCount(6);
-  await expect(readers.locator('.rrow [data-reader="nv"]').first()).toBeVisible();
-
   // Back to RADAR's list.
   await page.getByRole("tab", { name: "RADAR findings" }).click();
   await expect(page.locator('#findings[data-ready="true"] .finding')).toHaveCount(146, { timeout: 30_000 });
 });
 
-test("readers tab: reports and questions are visible on open, a question is answered in place", async ({ page }) => {
+test("readers tab: header, impression and questions are visible on open, a question is answered in place", async ({ page }) => {
   await login(page);
   const scan = await seededScan(page);
   const view = await (await page.request.get(`/scans/${scan.id}/readers`)).json();
   const q = view.rows.find((r) => r.id === "ascites").queries.find((x) => x.kind === "yes_no");
   expect(q, "a seeded yes/no question for ascites").toBeTruthy();
   expect(view.nv.report.answer).toContain("IMPRESSION:");
-  expect(view.report.text).toContain("Small volume ascites");
 
   await page.goto(`/workspace.html?scan=${encodeURIComponent(scan.id)}`);
   await page.getByRole("tab", { name: "NV-Reason-CT findings" }).click();
   const readers = page.locator('#readers[data-ready="true"]');
-  await expect(readers.getByText("Three readers of the same scan")).toBeVisible();
+  await expect(readers.getByText("saw a 384 mm cube of the scan")).toBeVisible();
+  await expect(readers.getByRole("button", { name: "Open reports" })).toBeVisible();
+  await expect(readers.getByText("Radiologist's report attached.")).toBeVisible();
 
-  // Reports: the pane shows short summaries (impression clamped, no folds); the full text lives in the reports window.
-  const nv = readers.locator('[data-card="nv"]');
-  await expect(nv.locator('[data-part="impression"]')).toContainText("2. Left renal cyst.");
-  await expect(nv.locator('[data-part="impression"]')).not.toContainText("<answer>");
-  await expect(nv).not.toContainText("answer>");
-  await expect(nv.getByText("Findings", { exact: true })).toHaveCount(0);
-  await expect(nv.getByText("How it reasoned")).toHaveCount(0);
-  await expect(nv).toContainText("Research model. It saw a 384 mm cube of the scan.");
-  const rad = readers.locator('[data-part="radiologist"]');
-  await expect(rad).toContainText("Liver: A small hypodense lesion");
-  await expect(rad).not.toContainText("Small volume ascites in the pelvis.");
-  await expect(readers.locator('[data-card="report"]').getByRole("button", { name: "Open", exact: true })).toBeVisible();
-  await expect(readers.getByRole("button", { name: "Show all" })).toHaveCount(0);
+  // The impression is clamped, the full text lives in the reports window.
+  const imp = readers.locator('[data-part="impression"]');
+  await expect(imp).toContainText("Impression:");
+  await expect(imp).toContainText("2. Left renal cyst.");
+  await expect(imp).not.toContainText("<answer>");
+  await expect(readers.getByText("How it reasoned")).toHaveCount(0);
+  await expect(readers.locator('[data-part="radiologist"]')).toHaveCount(0);
 
   // Questions: every prepared question once, no answer yet.
   const ask = readers.locator("section", { has: page.getByRole("heading", { name: "Ask NV-Reason-CT" }) });
@@ -123,7 +140,7 @@ test("readers tab: reports and questions are visible on open, a question is answ
   await expect(asked.locator(".rqa")).not.toContainText("Yes..");
   await expect(asked.getByText("NV's answer differs from its report")).toBeVisible();
 
-  // The same question in its row shows the same answer; the dot stays the report read.
+  // The same question in its row shows the same answer; the NV cell stays the report read.
   await readers.locator('.rrow[data-row="ascites"] .rexpand').click();
   await expect(readers.locator(`.rdetails .rq[data-q="${q.id}"] .rqa`)).toContainText("NV: Yes.");
   await expect(readers.locator('.rrow[data-row="ascites"] [data-reader="nv"]')).toHaveAttribute("data-state", "absent");

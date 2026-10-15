@@ -1,13 +1,13 @@
-// The Readers tab: one row per label with the radiologist report, RADAR and NV-Reason-CT side by side.
-// It never says who is right; it shows where the readers agree, disagree, are silent or cannot see.
+// The NV-Reason-CT findings tab as an overview: NV's status and impression, then the findings grouped by where the
+// readers disagree, what NV found, what only the others found and what NV could not see. It never says who is right.
 // Every word from a report, a read or an answer goes in as text (el() uses text nodes), never as HTML.
 import { el, pct } from "./format.js";
-import { allQuestions, answerFor, arrange, clipLines, finePrint, foldText, HOLDS, KEY, noQuestionsText, nvPendingOf, shown, splitReport, STATE_TEXT, SYMBOL } from "./readers.js";
+import { allQuestions, answerFor, foldText, HOLDS, noQuestionsText, nvPendingOf, overview, runNotes, shown, splitReport, STATE_TEXT, WORD } from "./readers.js";
 
 const NAMES = { report: "Report", radar: "RADAR", nv: "NV" };
 const ANSWER_CHARS = 300; // longer answers are cut here in the narrow pane; the reports window has them in full
 
-export function createReadersView({ root, onOrgan, onRetryReads, onRunNv, onAsk, onAddReport, onOpenReports, onThreshold }) {
+export function createReadersView({ root, onOrgan, onRetryReads, onRunNv, onAsk, onAddReport, onOpenReports }) {
   const state = { view: null, threshold: 50, open: new Set(), foldOpen: false, othersOpen: false, error: null, asking: new Set(), askError: null };
 
   // No Report column without a report, no NV column when NV cannot run and never did.
@@ -16,54 +16,46 @@ export function createReadersView({ root, onOrgan, onRetryReads, onRunNv, onAsk,
     return [state.view?.has_report ? "report" : null, "radar", nv?.unavailable && !nv.job ? null : "nv"].filter(Boolean);
   };
   const link = (label, run) => el("button", { type: "button", class: "link rretry", onclick: run }, label);
-  const note = (text) => el("span", { class: "muted small" }, text);
+  const note = (text) => el("span", { class: "muted" }, text);
 
-  const section = (title, ...body) => el("section", { class: "rsec" }, el("h3", {}, title), ...body);
-  const reportsHead = () => el("div", { class: "rsec-head" }, el("h3", {}, "Reports"), el("button", { type: "button", class: "rquiet", onclick: onOpenReports }, "Open reports"));
+  const section = (title, ...body) => el("section", { class: "rsec rgroup" }, el("h3", { class: "rgroup-head" }, title), ...body);
 
-  function nvCard(view) {
+  // NV's status on one line, with the action it offers; the notes under it are muted lines.
+  function nvStatus(view) {
     const nv = view.nv;
     const job = nv.job;
-    const body = [];
-    if (!job) {
-      body.push(nv.unavailable ? note(`Not available: ${nv.unavailable}.`) : el("p", { class: "muted" }, "Not run yet. ", link("Run NV-Reason-CT", onRunNv)));
-    } else if (job.state === "failed" || job.state === "cancelled") {
-      body.push(el("p", { class: "rretry" }, `It did not finish${job.error?.message ? `: ${job.error.message}` : "."} `, link("Retry", onRunNv)));
-    } else if (job.state === "queued" && job.hold_reason) {
-      body.push(note(`Waiting, ${HOLDS[job.hold_reason] || job.hold_reason}.`));
-    } else if (job.state === "queued" || job.state === "submitted") {
-      body.push(el("p", { class: "muted" }, "Reading the scan, about 2 minutes."));
-    } else if (nv.report) {
-      const { impression } = splitReport(nv.report.answer);
-      body.push(el("p", { class: "rtext rclamp", "data-part": "impression" }, impression || "NV wrote no impression."));
-      body.push(el("p", {}, link("Open", onOpenReports)));
-      body.push(note(finePrint(nv)));
-    } else {
-      body.push(note("Its report is not available."));
-    }
-    if (job?.state === "done") {
-      if (nv.read.status === "pending") body.push(el("p", {}, note("Reading its report for the table below…")));
-      if (nv.read.status === "failed") body.push(el("p", {}, link("Could not read its report for the table, retry", onRetryReads)));
-      if (nv.read.status === "no_llm") body.push(el("p", {}, note("Reading its report for the table needs a chat model.")));
-    }
-    return el("div", { class: "rcard", "data-card": "nv" }, el("h4", {}, "NV-Reason-CT's report"), ...body);
+    if (!job) return nv.unavailable ? note(`not available: ${nv.unavailable}.`) : el("span", { class: "muted" }, "not run yet. ", link("Run NV-Reason-CT", onRunNv));
+    if (job.state === "failed" || job.state === "cancelled") return el("span", { class: "rretry" }, `did not finish${job.error?.message ? `: ${job.error.message}` : "."} `, link("Retry", onRunNv));
+    if (job.state === "queued" && job.hold_reason) return note(`waiting, ${HOLDS[job.hold_reason] || job.hold_reason}.`);
+    if (job.state === "queued" || job.state === "submitted") return el("span", { class: "muted" }, "reading the scan, about 2 minutes.");
+    return nv.report ? el("span", { class: "muted" }, "saw a 384 mm cube of the scan") : note("its report is not available.");
   }
 
-  function radiologistCard(view) {
-    const body = [];
-    if (!view.has_report) {
-      body.push(el("p", { class: "muted" }, "No report attached."), el("button", { type: "button", class: "rquiet", onclick: onAddReport }, "Add report"));
-    } else {
-      const text = view.report.text || "";
-      const clip = clipLines(text);
-      body.push(el("p", { class: "rtext", "data-part": "radiologist" }, clip.cut ? `${clip.text}…` : text));
-      if (clip.cut) body.push(el("p", {}, link("Open", onOpenReports)));
-      const status = view.report.status;
-      if (status === "pending") body.push(el("p", {}, note("Reading it for the table below…")));
-      if (status === "failed") body.push(el("p", {}, link("Could not read it for the table, retry", onRetryReads)));
-      if (status === "no_llm") body.push(el("p", {}, note("Reading it for the table needs a chat model.")));
+  function headBlock(view) {
+    const nv = view.nv;
+    const done = nv.job?.state === "done";
+    const parts = [el("div", { class: "ohead" }, el("p", { class: "otitle" }, el("strong", {}, "NV-Reason-CT"), " ", nvStatus(view)), el("button", { type: "button", class: "rquiet", onclick: onOpenReports }, "Open reports"))];
+    if (done && nv.report) {
+      const { impression } = splitReport(nv.report.answer);
+      parts.push(el("p", { class: "rtext rclamp", "data-part": "impression" }, el("strong", {}, "Impression: "), impression || "NV wrote no impression."));
+      const fine = runNotes(nv).join(" ");
+      if (fine) parts.push(el("p", { class: "muted small" }, fine));
     }
-    return el("div", { class: "rcard", "data-card": "report" }, el("h4", {}, "Radiologist's report"), ...body);
+    if (done) {
+      if (nv.read.status === "pending") parts.push(el("p", { class: "muted small" }, "Reading its report for the findings below…"));
+      if (nv.read.status === "failed") parts.push(el("p", { class: "small" }, link("Could not read its report for the findings, retry", onRetryReads)));
+      if (nv.read.status === "no_llm") parts.push(el("p", { class: "muted small" }, "Reading its report for the findings needs a chat model."));
+    }
+    if (view.has_report) {
+      parts.push(el("p", { class: "muted small" }, "Radiologist's report attached."));
+      const status = view.report.status;
+      if (status === "pending") parts.push(el("p", { class: "muted small" }, "Reading it for the findings below…"));
+      if (status === "failed") parts.push(el("p", { class: "small" }, link("Could not read it for the findings, retry", onRetryReads)));
+      if (status === "no_llm") parts.push(el("p", { class: "muted small" }, "Reading it for the findings needs a chat model."));
+    } else {
+      parts.push(el("p", { class: "muted small" }, "No radiologist's report. ", el("button", { type: "button", class: "rquiet", onclick: onAddReport }, "Add report")));
+    }
+    return el("div", { class: "rsec ohead-block" }, parts);
   }
 
   // One question asked in place: its button, then its answer, failure or wait underneath.
@@ -92,14 +84,6 @@ export function createReadersView({ root, onOrgan, onRetryReads, onRunNv, onAsk,
       state.askError ? el("p", { class: "rretry" }, state.askError) : null,
       noChat ? null : el("p", { class: "muted small" }, "Or ask the chat on the right to put your own question to NV-Reason-CT."),
     );
-  }
-
-  function header() {
-    return el("div", { class: "rhead", style: `--cols:${readers().length}` }, el("span"), el("span"), el("span"), readers().map((r) => el("span", { class: "rcol" }, NAMES[r])));
-  }
-
-  function cell(reader, value) {
-    return el("span", { class: "rcell", "data-reader": reader, "data-state": value, title: `${NAMES[reader]}: ${STATE_TEXT[value] || "not read"}` }, SYMBOL[value]);
   }
 
   // A claim without a quote is shown as such, so it reads as unverified.
@@ -148,23 +132,50 @@ export function createReadersView({ root, onOrgan, onRetryReads, onRunNv, onAsk,
     render();
   }
 
+  function cell(reader, value, row) {
+    const text = reader === "radar" ? (value === "not_scored" ? "—" : pct(row.radar.max_prob, 0)) : WORD[value];
+    return el("span", { class: "rcell", "data-reader": reader, "data-state": value, title: `${NAMES[reader]}: ${STATE_TEXT[value] || "not read"}` }, `${NAMES[reader]} ${text}`);
+  }
+
   function rowNodes({ row, cells, flag }) {
     const open = state.open.has(row.id);
+    const shownReaders = readers();
+    const slots = ["nv", "report", "radar"].filter((r) => shownReaders.includes(r)).map((r) => cell(r, cells[r], row));
     const node = el(
       "div",
       {
-        class: `rrow${flag ? " flagged" : ""}${row.organ ? " jumps" : ""}`,
-        style: `--cols:${readers().length}`,
+        class: `rrow${flag ? " flagged" : ""}`,
         "data-row": row.id,
         title: row.organ ? `Jump to the ${row.organ.toLowerCase()}` : null,
-        onclick: () => row.organ && onOrgan(row.organ),
+        onclick: () => {
+          if (row.organ) onOrgan(row.organ);
+          toggleRow(row.id);
+        },
       },
       el("button", { type: "button", class: "rexpand", "aria-expanded": String(open), "aria-label": `${open ? "Hide" : "Show"} details for ${row.title}`, onclick: (e) => (e.stopPropagation(), toggleRow(row.id)) }, open ? "▾" : "▸"),
-      el("span", { class: "rflag", title: flag ? "One reader says present, another says absent" : null }, flag ? "⚑" : ""),
       el("span", { class: "rtitle" }, row.title),
-      readers().map((r) => cell(r, cells[r])),
+      slots,
     );
     return open ? [node, details(row)] : [node];
+  }
+
+  function group(key, title, items) {
+    if (!items.length) return null;
+    return el("section", { class: "rgroup", "data-group": key }, el("h3", { class: "rgroup-head" }, title, " ", el("span", { class: "rcount" }, String(items.length))), ...items.flatMap(rowNodes));
+  }
+
+  function outsideGroup(items) {
+    if (!items.length) return null;
+    return el(
+      "section",
+      { class: "rgroup", "data-group": "outside" },
+      el("h3", { class: "rgroup-head" }, "NV could not see ", el("span", { class: "rcount" }, String(items.length))),
+      ...items.map(({ row }) => {
+        const claim = row.nv.state === "present" || row.nv.state === "absent"; // silence is not something NV said
+        const said = !claim ? null : row.nv.quote ? `NV said ${STATE_TEXT[row.nv.state]}, "${row.nv.quote}"` : `NV said ${STATE_TEXT[row.nv.state]}`;
+        return el("p", { class: "rout", "data-out": row.id }, el("span", { class: "rtitle" }, row.title), el("span", { class: "muted small" }, ` · ${Math.round(row.nv.coverage * 100)}% inside NV's view${said ? ` · ${said}` : ""}`));
+      }),
+    );
   }
 
   function fold(items) {
@@ -181,48 +192,24 @@ export function createReadersView({ root, onOrgan, onRetryReads, onRunNv, onAsk,
     return [head, el("ul", { class: "rothers" }, items.map((m) => el("li", {}, el("span", { class: "muted small" }, m.reader === "report" ? "Report: " : "NV: "), `"${m.quote}"`)))];
   }
 
-  function legend() {
-    const states = KEY.filter((s) => s !== "outside" || readers().includes("nv"));
-    const items = states.map((s) => el("span", {}, el("span", { class: "rcell", "data-state": s }, SYMBOL[s]), ` ${STATE_TEXT[s]}`));
-    return el("p", { class: "rkey muted small" }, [...items, el("span", {}, "⚑ disagree")]);
-  }
-
-  // The display line and the table live in nodes that outlive a render, so dragging the slider is never interrupted.
-  const lineOut = el("output", {}, "50%");
-  const lineInput = el("input", { type: "range", min: "0", max: "100", step: "1", value: "50", "aria-label": "Display line", oninput: () => onThreshold?.(Number(lineInput.value)) });
-  const line = el("div", { class: "rline" }, el("label", {}, "Display line ", lineOut), lineInput, el("p", { class: "muted small" }, "RADAR ships no calibrated thresholds; this line is for display. A score is not urgency."));
-  const table = el("div", { class: "rtable" });
-
-  function renderTable() {
-    const view = state.view;
-    lineInput.value = String(state.threshold);
-    lineOut.textContent = `${state.threshold}%`;
-    if (!view) return;
-    const { flagged, positive, waiting, folded } = arrange(view.rows, {
-      threshold: state.threshold,
-      nvPending: nvPendingOf(view),
-      reportPending: view.has_report && view.report.status === "pending",
-    });
-    table.replaceChildren(header(), ...[...flagged, ...positive, ...waiting].flatMap(rowNodes), ...fold(folded), ...others(view), legend());
-  }
-
   function render() {
     if (state.error) return root.replaceChildren(el("p", { class: "muted" }, state.error));
     const view = state.view;
     if (!view) return root.replaceChildren(el("p", { class: "muted" }, "Loading the readers…"));
     const noChat = [view.report?.status, view.nv?.read?.status, view.queries?.status].includes("no_llm");
+    const g = overview(view.rows, { threshold: state.threshold, nvPending: nvPendingOf(view), reportPending: view.has_report && view.report.status === "pending" });
     const parts = [
-      el("p", { class: "rintro muted" }, "Three readers of the same scan: the radiologist's report, RADAR's scores and NV-Reason-CT's own report. Nothing here says who is right."),
-      el("section", { class: "rsec" }, reportsHead(), el("div", { class: "rcards" }, radiologistCard(view), nvCard(view))),
+      headBlock(view),
+      el("p", { class: "muted small rline-note", "data-part": "display-line" }, `RADAR counts as present at or above the display line, now ${state.threshold}%. Set it on the RADAR findings tab.`),
+      group("disagree", "Disagree", g.disagree),
+      group("nv-found", "NV found", g.nvFound),
+      group("others-found", "Found by the others", g.othersFound),
+      group("waiting", "Waiting for a reader", g.waiting),
+      outsideGroup(g.outside),
+      ...fold(g.quiet),
       askSection(view, noChat),
-      section(
-        "Compare the readers",
-        el("p", { class: "muted small" }, "Each row is a finding. ● says present, ○ says absent. ⚑ marks rows where the readers disagree. Click a row to see each reader's own words."),
-        line,
-        table,
-      ),
+      ...others(view),
     ];
-    renderTable();
     root.replaceChildren(...parts.filter(Boolean));
     root.dataset.ready = "true";
   }
@@ -240,7 +227,7 @@ export function createReadersView({ root, onOrgan, onRetryReads, onRunNv, onAsk,
     },
     setThreshold(percent) {
       state.threshold = percent;
-      renderTable();
+      render();
     },
     get view() {
       return state.view;
