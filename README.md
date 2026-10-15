@@ -10,8 +10,8 @@ Research use only. Not a medical device.
 
 - Upload a `.nii` / `.nii.gz` scan and press Score.
 - Add the radiologist's report from the scan bar ("Add report": paste it or choose a `.txt` file). Optional.
-- Readers tab: the radiologist's report, RADAR and NV-Reason-CT on the same scan, one row per finding. ● present, ○ absent, – not mentioned, ◌ outside NV-Reason-CT's view, · not scored, ⚑ where one says present and another absent. None of them is treated as right. The attached report and NV-Reason-CT's report are read by the chat model you set in `CHAT_MODEL`, so the Report and NV columns need one. RADAR's dots follow the display line. "NV's view" in the viewer draws the part of the scan NV-Reason-CT reads.
-- Ask NV-Reason-CT: press a prepared question in a Readers row, or ask in the chat. The first question after a few idle minutes takes about 2 minutes while the model wakes up; follow-ups take seconds.
+- NV-Reason-CT findings tab: the radiologist's report, RADAR and NV-Reason-CT on the same scan, one row per finding. ● present, ○ absent, – not mentioned, ◌ outside NV-Reason-CT's view, · not scored, ⚑ where one says present and another absent. None of them is treated as right. The attached report and NV-Reason-CT's report are read by the chat model you set in `CHAT_MODEL`, so the Report and NV columns need one. RADAR's dots follow the display line. "NV's view" in the viewer draws the part of the scan NV-Reason-CT reads. "Open reports" puts both full reports side by side in a window of their own, with NV-Reason-CT's reasoning and every answer it gave.
+- Ask NV-Reason-CT: press a prepared question in the NV-Reason-CT findings tab, or ask in the chat. The first question after a few idle minutes takes about 2 minutes while the model wakes up; follow-ups take seconds.
 - Click a finding or organ to jump to it.
 - `w` what am I looking at · `m` main + reference views · `f` focus mode · `1`-`5` window presets · `+` `-` zoom.
 - Light panel: window/level in HU, gamma, invert, colour map.

@@ -29,7 +29,7 @@ test("readers tab: rows, flags, fold, display line, words, jump, NV's view", asy
   expect(view.nv.read.status).toBe("ready");
 
   await page.goto(`/workspace.html?scan=${encodeURIComponent(scan.id)}`);
-  await page.getByRole("tab", { name: "Readers" }).click();
+  await page.getByRole("tab", { name: "NV-Reason-CT findings" }).click();
   await expect(page.locator("#findings")).toBeHidden();
   const readers = page.locator('#readers[data-ready="true"]');
   await expect(readers).toBeVisible();
@@ -92,7 +92,7 @@ test("readers tab: reports and questions are visible on open, a question is answ
   expect(view.report.text).toContain("Small volume ascites");
 
   await page.goto(`/workspace.html?scan=${encodeURIComponent(scan.id)}`);
-  await page.getByRole("tab", { name: "Readers" }).click();
+  await page.getByRole("tab", { name: "NV-Reason-CT findings" }).click();
   const readers = page.locator('#readers[data-ready="true"]');
   await expect(readers.getByText("Three readers of the same scan")).toBeVisible();
 
@@ -133,7 +133,7 @@ test("readers tab: Open reports pops out the full reports", async ({ page }) => 
   await login(page);
   const scan = await seededScan(page);
   await page.goto(`/workspace.html?scan=${encodeURIComponent(scan.id)}`);
-  await page.getByRole("tab", { name: "Readers" }).click();
+  await page.getByRole("tab", { name: "NV-Reason-CT findings" }).click();
   const readers = page.locator('#readers[data-ready="true"]');
   await expect(readers).toBeVisible();
 
@@ -155,7 +155,7 @@ test("readers tab: opening the reports again keeps the open window as it is", as
   await login(page);
   const scan = await seededScan(page);
   await page.goto(`/workspace.html?scan=${encodeURIComponent(scan.id)}`);
-  await page.getByRole("tab", { name: "Readers" }).click();
+  await page.getByRole("tab", { name: "NV-Reason-CT findings" }).click();
   const readers = page.locator('#readers[data-ready="true"]');
   await expect(readers).toBeVisible();
   const open = readers.getByRole("button", { name: "Open reports" });
