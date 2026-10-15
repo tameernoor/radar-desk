@@ -122,3 +122,9 @@ test("allQuestions de-duplicates by id and answerFor takes the latest answer", a
   expect(noQuestionsText({ nv: { job: null, unavailable: "needs Modal compute" } })).toContain("NV-Reason-CT: needs Modal compute");
   expect(noQuestionsText({ nv: { job: { state: "queued" } } })).toContain("once NV-Reason-CT has read");
 });
+
+test("shown hides the yes/no suffix and nothing else", async () => {
+  const { shown, YES_NO_SUFFIX } = await import("../src/readers.js");
+  expect(shown(`Is there fluid? ${YES_NO_SUFFIX}`)).toBe("Is there fluid?");
+  expect(shown("Where is the fluid?")).toBe("Where is the fluid?");
+});

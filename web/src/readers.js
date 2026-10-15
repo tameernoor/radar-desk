@@ -113,8 +113,21 @@ export function noQuestionsText(view) {
 }
 
 // The radiologist's report shortened to its first lines, with whether anything was cut.
-export const REPORT_LINES = 12;
-export function clipLines(text, max = REPORT_LINES) {
+export function clipLines(text, max = 4) {
   const lines = String(text ?? "").split("\n");
   return lines.length > max ? { text: lines.slice(0, max).join("\n"), cut: true } : { text: String(text ?? ""), cut: false };
+}
+
+// NV answers a yes/no question only when this suffix is sent with it; the display hides it.
+export const YES_NO_SUFFIX = "Answer only Yes or No."; // mirrors the Python constant
+export const shown = (text) => (text.endsWith(YES_NO_SUFFIX) ? text.slice(0, -YES_NO_SUFFIX.length).trimEnd() : text);
+
+export const HOLDS = { needs_modal: "needs Modal compute", budget: "over the monthly GPU budget", spawn_error: "could not start, trying again" };
+
+// The fine print under NV's report, shared by the pane and the reports window.
+export function finePrint(nv) {
+  const small = ["Research model. It saw a 384 mm cube of the scan."];
+  if (nv.fake) small.push("This is the fake backend, not model output.");
+  if (nv.crop?.fallback) small.push("It placed its view without finding the abdomen.");
+  return small.join(" ");
 }

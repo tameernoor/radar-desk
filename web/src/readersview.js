@@ -2,15 +2,13 @@
 // It never says who is right; it shows where the readers agree, disagree, are silent or cannot see.
 // Every word from a report, a read or an answer goes in as text (el() uses text nodes), never as HTML.
 import { el, pct } from "./format.js";
-import { allQuestions, answerFor, arrange, clipLines, foldText, KEY, noQuestionsText, nvPendingOf, splitReport, STATE_TEXT, SYMBOL } from "./readers.js";
+import { allQuestions, answerFor, arrange, clipLines, finePrint, foldText, HOLDS, KEY, noQuestionsText, nvPendingOf, shown, splitReport, STATE_TEXT, SYMBOL } from "./readers.js";
 
 const NAMES = { report: "Report", radar: "RADAR", nv: "NV" };
-const YES_NO_SUFFIX = "Answer only Yes or No."; // mirrors the Python constant; hidden in the display, still sent to NV
-const shown = (text) => text.endsWith(YES_NO_SUFFIX) ? text.slice(0, -YES_NO_SUFFIX.length).trimEnd() : text;
-const HOLDS = { needs_modal: "needs Modal compute", budget: "over the monthly GPU budget", spawn_error: "could not start, trying again" };
+const ANSWER_CHARS = 300; // longer answers are cut here in the narrow pane; the reports window has them in full
 
-export function createReadersView({ root, onOrgan, onRetryReads, onRunNv, onAsk, onAddReport, onThreshold }) {
-  const state = { view: null, threshold: 50, open: new Set(), foldOpen: false, othersOpen: false, error: null, asking: new Set(), askError: null, detailsOpen: new Set(), reportOpen: false };
+export function createReadersView({ root, onOrgan, onRetryReads, onRunNv, onAsk, onAddReport, onOpenReports, onThreshold }) {
+  const state = { view: null, threshold: 50, open: new Set(), foldOpen: false, othersOpen: false, error: null, asking: new Set(), askError: null };
 
   // No Report column without a report, no NV column when NV cannot run and never did.
   const readers = () => {
@@ -21,11 +19,7 @@ export function createReadersView({ root, onOrgan, onRetryReads, onRunNv, onAsk,
   const note = (text) => el("span", { class: "muted small" }, text);
 
   const section = (title, ...body) => el("section", { class: "rsec" }, el("h3", {}, title), ...body);
-
-  // <details> that stay open across the re-renders a poll causes.
-  function folded1(key, label, body) {
-    return el("details", { class: "rfolded", open: state.detailsOpen.has(key), ontoggle: (e) => (e.target.open ? state.detailsOpen.add(key) : state.detailsOpen.delete(key)) }, el("summary", {}, label), body);
-  }
+  const reportsHead = () => el("div", { class: "rsec-head" }, el("h3", {}, "Reports"), el("button", { type: "button", class: "rquiet", onclick: onOpenReports }, "Open reports"));
 
   function nvCard(view) {
     const nv = view.nv;
@@ -40,14 +34,10 @@ export function createReadersView({ root, onOrgan, onRetryReads, onRunNv, onAsk,
     } else if (job.state === "queued" || job.state === "submitted") {
       body.push(el("p", { class: "muted" }, "Reading the scan, about 2 minutes."));
     } else if (nv.report) {
-      const { findings, impression } = splitReport(nv.report.answer);
-      body.push(el("p", { class: "rtext", "data-part": "impression" }, impression || "NV wrote no impression."));
-      if (findings) body.push(folded1("nv-findings", "Findings", el("p", { class: "rtext" }, findings)));
-      if (nv.report.thinking) body.push(folded1("nv-thinking", "How it reasoned", el("p", { class: "rtext muted" }, nv.report.thinking)));
-      const small = ["Research model. It saw a 384 mm cube of the scan."];
-      if (nv.fake) small.push("This is the fake backend, not model output.");
-      if (nv.crop?.fallback) small.push("It placed its view without finding the abdomen.");
-      body.push(note(small.join(" ")));
+      const { impression } = splitReport(nv.report.answer);
+      body.push(el("p", { class: "rtext rclamp", "data-part": "impression" }, impression || "NV wrote no impression."));
+      body.push(el("p", {}, link("Open", onOpenReports)));
+      body.push(note(finePrint(nv)));
     } else {
       body.push(note("Its report is not available."));
     }
@@ -66,9 +56,8 @@ export function createReadersView({ root, onOrgan, onRetryReads, onRunNv, onAsk,
     } else {
       const text = view.report.text || "";
       const clip = clipLines(text);
-      const showAll = state.reportOpen || !clip.cut;
-      body.push(el("p", { class: "rtext", "data-part": "radiologist" }, showAll ? text : `${clip.text}…`));
-      if (clip.cut) body.push(link(state.reportOpen ? "Show less" : "Show all", () => ((state.reportOpen = !state.reportOpen), render())));
+      body.push(el("p", { class: "rtext", "data-part": "radiologist" }, clip.cut ? `${clip.text}…` : text));
+      if (clip.cut) body.push(el("p", {}, link("Open", onOpenReports)));
       const status = view.report.status;
       if (status === "pending") body.push(el("p", {}, note("Reading it for the table below…")));
       if (status === "failed") body.push(el("p", {}, link("Could not read it for the table, retry", onRetryReads)));
@@ -88,7 +77,9 @@ export function createReadersView({ root, onOrgan, onRetryReads, onRunNv, onAsk,
     if (busy) under.push(el("p", { class: "muted small rwait" }, nv.warm ? "Asking…" : "Asking... the first question after a pause takes about 2 minutes."));
     else if (failed) under.push(el("p", { class: "rretry small" }, `${failed[0].toUpperCase()}${failed.slice(1)}.`));
     if (answer && !busy) {
-      under.push(el("p", { class: "rqa" }, `NV: ${answer.answer || "no answer"}`, answer.differs ? el("span", { class: "rdiffers" }, `${String(answer.answer ?? "").endsWith(".") ? " " : ". "}NV's answer differs from its report`) : null));
+      const full = answer.answer || "no answer";
+      const long = full.length > ANSWER_CHARS;
+      under.push(el("p", { class: "rqa" }, `NV: ${long ? `${full.slice(0, ANSWER_CHARS)}…` : full}`, long ? [" ", link("Read in full", onOpenReports)] : null, answer.differs ? el("span", { class: "rdiffers" }, `${!long && String(answer.answer ?? "").endsWith(".") ? " " : ". "}NV's answer differs from its report`) : null));
     }
     return el("div", { class: "rq", "data-q": q.id }, el("button", { type: "button", class: "rchip", "data-query": q.id, disabled: inFlight, title: "Ask NV-Reason-CT this question", onclick: (e) => (e.stopPropagation(), ask(q)) }, shown(q.text)), ...under);
   }
@@ -222,7 +213,7 @@ export function createReadersView({ root, onOrgan, onRetryReads, onRunNv, onAsk,
     const noChat = [view.report?.status, view.nv?.read?.status, view.queries?.status].includes("no_llm");
     const parts = [
       el("p", { class: "rintro muted" }, "Three readers of the same scan: the radiologist's report, RADAR's scores and NV-Reason-CT's own report. Nothing here says who is right."),
-      section("Reports", el("div", { class: "rcards" }, radiologistCard(view), nvCard(view))),
+      el("section", { class: "rsec" }, reportsHead(), el("div", { class: "rcards" }, radiologistCard(view), nvCard(view))),
       askSection(view, noChat),
       section(
         "Compare the readers",

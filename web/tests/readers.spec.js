@@ -96,17 +96,19 @@ test("readers tab: reports and questions are visible on open, a question is answ
   const readers = page.locator('#readers[data-ready="true"]');
   await expect(readers.getByText("Three readers of the same scan")).toBeVisible();
 
-  // Reports: NV's impression in full, its findings and reasoning folded, never the answer tag; the radiologist's text.
+  // Reports: the pane shows short summaries (impression clamped, no folds); the full text lives in the reports window.
   const nv = readers.locator('[data-card="nv"]');
   await expect(nv.locator('[data-part="impression"]')).toContainText("2. Left renal cyst.");
   await expect(nv.locator('[data-part="impression"]')).not.toContainText("<answer>");
   await expect(nv).not.toContainText("answer>");
-  await expect(nv.getByText("Liver: A small hypodense lesion")).toBeHidden();
-  await nv.getByText("Findings", { exact: true }).click();
-  await expect(nv.getByText("Liver: A small hypodense lesion")).toBeVisible();
-  await expect(nv.getByText("Fake thinking.")).toBeHidden();
+  await expect(nv.getByText("Findings", { exact: true })).toHaveCount(0);
+  await expect(nv.getByText("How it reasoned")).toHaveCount(0);
   await expect(nv).toContainText("Research model. It saw a 384 mm cube of the scan.");
-  await expect(readers.locator('[data-part="radiologist"]')).toContainText("Small volume ascites in the pelvis.");
+  const rad = readers.locator('[data-part="radiologist"]');
+  await expect(rad).toContainText("Liver: A small hypodense lesion");
+  await expect(rad).not.toContainText("Small volume ascites in the pelvis.");
+  await expect(readers.locator('[data-card="report"]').getByRole("button", { name: "Open", exact: true })).toBeVisible();
+  await expect(readers.getByRole("button", { name: "Show all" })).toHaveCount(0);
 
   // Questions: every prepared question once, no answer yet.
   const ask = readers.locator("section", { has: page.getByRole("heading", { name: "Ask NV-Reason-CT" }) });
@@ -125,4 +127,44 @@ test("readers tab: reports and questions are visible on open, a question is answ
   await readers.locator('.rrow[data-row="ascites"] .rexpand').click();
   await expect(readers.locator(`.rdetails .rq[data-q="${q.id}"] .rqa`)).toContainText("NV: Yes.");
   await expect(readers.locator('.rrow[data-row="ascites"] [data-reader="nv"]')).toHaveAttribute("data-state", "absent");
+});
+
+test("readers tab: Open reports pops out the full reports", async ({ page }) => {
+  await login(page);
+  const scan = await seededScan(page);
+  await page.goto(`/workspace.html?scan=${encodeURIComponent(scan.id)}`);
+  await page.getByRole("tab", { name: "Readers" }).click();
+  const readers = page.locator('#readers[data-ready="true"]');
+  await expect(readers).toBeVisible();
+
+  const [popup] = await Promise.all([page.waitForEvent("popup"), readers.getByRole("button", { name: "Open reports" }).click()]);
+  await expect(popup).toHaveURL(new RegExp(`/reports\\.html\\?scan=${scan.id}`));
+  const rad = popup.locator('[data-col="radiologist"]');
+  await expect(rad).toContainText("Peritoneum: Small volume ascites in the pelvis.");
+  await expect(rad).toContainText("2. Small volume ascites.");
+  const nv = popup.locator('[data-col="nv"]');
+  await expect(nv.getByRole("heading", { name: "Impression" })).toBeVisible();
+  await expect(nv).toContainText("2. Left renal cyst.");
+  await expect(nv.getByRole("heading", { name: "Findings" })).toBeVisible();
+  await expect(nv).toContainText("Liver: A small hypodense lesion");
+  await expect(nv.locator("details", { hasText: "How it reasoned" })).toHaveCount(1);
+  await expect(nv.locator("details")).not.toHaveAttribute("open", "");
+});
+
+test("readers tab: opening the reports again keeps the open window as it is", async ({ page }) => {
+  await login(page);
+  const scan = await seededScan(page);
+  await page.goto(`/workspace.html?scan=${encodeURIComponent(scan.id)}`);
+  await page.getByRole("tab", { name: "Readers" }).click();
+  const readers = page.locator('#readers[data-ready="true"]');
+  await expect(readers).toBeVisible();
+  const open = readers.getByRole("button", { name: "Open reports" });
+  const [popup] = await Promise.all([page.waitForEvent("popup"), open.click()]);
+  await popup.locator("summary").click();
+  await expect(popup.locator("details")).toHaveAttribute("open", "");
+  await popup.evaluate(() => (document.body.dataset.marker = "same document"));
+  await open.click();
+  await page.waitForTimeout(500);
+  await expect(popup.locator("body")).toHaveAttribute("data-marker", "same document"); // not reloaded
+  await expect(popup.locator("details")).toHaveAttribute("open", "");
 });

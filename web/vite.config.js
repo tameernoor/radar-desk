@@ -15,6 +15,7 @@ export default defineConfig({
         index: resolve(import.meta.dirname, "index.html"),
         workspace: resolve(import.meta.dirname, "workspace.html"),
         jobs: resolve(import.meta.dirname, "jobs.html"),
+        reports: resolve(import.meta.dirname, "reports.html"),
       },
     },
   },

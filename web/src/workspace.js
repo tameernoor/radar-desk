@@ -492,6 +492,21 @@ async function loadMask(job) {
 // ---------- readers ----------
 
 let readersTimer = null;
+const readersChannel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("radar-desk-readers") : null;
+
+// The full reports open in their own window next to the workspace; one window per scan.
+function openReports() {
+  const id = ws.scan.id;
+  // An empty URL reuses a live window as it is; only a new (blank) one is navigated, so reading position survives.
+  const win = window.open("", `radar-desk-reports-${id}`, "popup,width=1100,height=900");
+  if (!win) return notice("The browser blocked the reports window. Allow pop-ups for this page and try again.");
+  let blank = true; // a window that has left this site cannot be read, so it is sent back to the reports
+  try {
+    blank = win.location.href === "about:blank";
+  } catch {}
+  if (blank) win.location.href = `/reports.html?scan=${encodeURIComponent(id)}`;
+  win.focus();
+}
 
 async function loadReaders() {
   clearTimeout(readersTimer);
@@ -502,6 +517,7 @@ async function loadReaders() {
     return;
   }
   ws.readersView.setView(ws.readers);
+  readersChannel?.postMessage({ scan_id: ws.scan.id, view: ws.readers });
   const hasCrop = Boolean(ws.readers.nv?.crop?.box_mm);
   $("nv-view-toggle").hidden = !hasCrop;
   if (!hasCrop && ws.nvViewOn) toggleNvView(false);
@@ -810,6 +826,7 @@ async function main() {
       await loadReaders();
     },
     onAddReport: () => ws.report?.open(),
+    onOpenReports: openReports,
     onThreshold: (percent) => ws.findings.setThreshold(percent),
   });
   ws.findings.setCatalog(catalog.findings, labels.scored_organs);
