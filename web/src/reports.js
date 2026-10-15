@@ -7,7 +7,7 @@ import { wireLogout } from "./login.js";
 import { finePrint, HOLDS, isBusy, shown, splitReport } from "./readers.js";
 
 const $ = (id) => document.getElementById(id);
-const SUB = "The radiologist's report and NV-Reason-CT's report of the same scan, side by side. Nothing here says who is right.";
+const SUB = "The radiologist's report and NV-Reason-CT's report of the same scan, side by side.";
 const FROM_WORKSPACE = "Run or retry it from the workspace.";
 
 let scanId = null;
