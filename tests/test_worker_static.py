@@ -15,7 +15,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 WORKER = ROOT / "worker"
 SCRIPTS = [ROOT / "scripts" / n for n in ("weights_check.py", "modal_spike.py", "parity.py", "score_local.py")]
-PY310_FILES = sorted((WORKER / "radar_worker").glob("*.py")) + [WORKER / "modal_app.py"] + SCRIPTS
+PY310_FILES = (sorted((WORKER / "radar_worker").glob("*.py")) + [WORKER / "modal_app.py", WORKER / "nvreason_app.py"]
+               + SCRIPTS)
 
 EXPECTED_WEIGHTS = {
     "checkpoint_radar_pretrain.pth": 1566049482,

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reports · radar-desk</title>
+</head>
+<body class="page reports-page">
+  <header class="topbar">
+    <a class="brand" href="/">radar-desk</a>
+    <a class="by" href="https://hbdlabs.com/" target="_blank" rel="noopener">by hbdlabs</a>
+    <span class="research-tag">Research use only</span>
+    <button type="button" class="link" id="logout">Log out</button>
+  </header>
+  <div class="reports-head">
+    <h1 id="reports-title">Reports</h1>
+    <p class="muted" id="reports-sub"></p>
+  </div>
+  <main class="reports-cols" id="reports-cols"></main>
+  <footer class="footer">
+    <p class="licence">Model: RADAR by Alibaba DAMO Academy, CC BY-NC-SA 4.0. Paper: "An expert-level generalist AI for abdominal CT diagnosis", Science 393(6817), doi 10.1126/science.aec6129. Weights: <a href="https://huggingface.co/radar-generalist/RADAR" target="_blank" rel="noopener">huggingface.co/radar-generalist/RADAR</a>.</p>
+    <p class="licence">From the model card: "The Radar model is currently intended for research purposes only. Further improvements and prospective clinical studies are still required before it can be used directly for clinical deployment." Not a medical device.</p>
+  </footer>
+  <script type="module" src="/src/reports.js"></script>
+</body>
+</html>

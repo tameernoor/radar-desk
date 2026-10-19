@@ -19,12 +19,14 @@ from radar_desk.services.errors import ServiceError
 from radar_desk.services.exports import ExportService
 from radar_desk.services.fixtures import DEFAULT_ROOT, FixtureService
 from radar_desk.services.jobs import JobService
+from radar_desk.services.nvreason import NvReasonService
+from radar_desk.services.readers import ReadersService
 from radar_desk.services.results import ResultService
 from radar_desk.services.scans import ScanService
 from radar_desk.services.workers import WorkerService
 from radar_desk.storage import Storage, make_storage
 
-__all__ = ["ServiceError", "Services", "build_services", "make_backend"]
+__all__ = ["ServiceError", "Services", "build_services", "make_backend", "make_nv_backend"]
 
 
 @dataclass
@@ -41,6 +43,8 @@ class Services:
     results: ResultService
     exports: ExportService
     workers: WorkerService
+    nvreason: NvReasonService
+    readers: ReadersService
 
     @property
     def backend(self) -> Any:
@@ -88,6 +92,29 @@ def make_backend(settings: Any, db: Database, storage: Storage, name: str | None
     return FakeGpuBackend(synthesize=synthesize)
 
 
+def make_nv_backend(settings: Any, db: Database, name: str) -> Any:
+    """The NV-Reason-CT backend for compute mode `name`: the deployed Modal class, or the fake stand-in."""
+    if name == "modal":
+        from radar_desk.gpu.nvreason_backend import ModalNvReasonBackend
+
+        return ModalNvReasonBackend(settings)
+    from radar_desk.gpu.nvreason_fake import FakeNvReasonBackend, synthesize_nv_result
+
+    def synthesize(job_id: str) -> dict:
+        job = db.get_job(job_id)
+        return synthesize_nv_result(job, db.get_scan(job.scan_id))
+
+    return FakeNvReasonBackend(synthesize=synthesize)
+
+
+def _readers_llm(settings: Any) -> Any:
+    """The chat model client for the reading radiologist, or None without CHAT_MODEL. Imported here, not at the top,
+    because the chat package imports the services package."""
+    from radar_desk.chat.agent import make_llm
+
+    return make_llm(settings)
+
+
 def build_services(
     settings: Any,
     *,
@@ -99,6 +126,9 @@ def build_services(
     probe: Callable[[str], dict | None] | None = None,
     fixtures_root: Path = DEFAULT_ROOT,
     clock: Callable[[], float] = time.time,
+    nv_backend: Any = None,
+    readers_llm: Any = None,
+    readers_runner: Any = None,
 ) -> Services:
     """Wire the services. A backend given here, or GPU_BACKEND=fake, is fixed; modal, worker, runpod and
     serverless give a choice the owner can change, each backend built on first use."""
@@ -127,6 +157,19 @@ def build_services(
                              tunnel=tunnel, probe=probe, port=urlparse(settings.public_base_url).port or 8000,
                              clock=clock)
     workers.mode = lambda: compute.mode
+    nv_factory = (lambda name: nv_backend) if nv_backend is not None else (
+        lambda name: make_nv_backend(settings, db, name))
+    nvreason = NvReasonService(db, settings, storage, compute, costs, nv_factory, clock=clock)
+    jobs = JobService(db, settings, compute, costs, clock=clock)
+    jobs.after_create.append(nvreason.ensure_job)
+    scans = ScanService(db, storage, settings, fixtures)
+    readers = ReadersService(settings, db, storage, scans, nvreason,
+                             readers_llm if readers_llm is not None else _readers_llm(settings),
+                             runner=readers_runner)
+    scans.report_listeners.append(readers.kick)
+    scans.delete_listeners.append(readers.delete)
+    scans.delete_listeners.append(nvreason.delete_scan_copies)
+    nvreason.on_done.append(readers.kick)
     return Services(
         settings=settings,
         db=db,
@@ -135,9 +178,11 @@ def build_services(
         catalog=catalog_module,
         fixtures=fixtures,
         costs=costs,
-        scans=ScanService(db, storage, settings, fixtures),
-        jobs=JobService(db, settings, compute, costs, clock=clock),
+        scans=scans,
+        jobs=jobs,
         results=results,
         exports=ExportService(db, storage, include_fake=compute.mode == "fake"),
         workers=workers,
+        nvreason=nvreason,
+        readers=readers,
     )

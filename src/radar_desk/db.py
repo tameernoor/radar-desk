@@ -131,6 +131,9 @@ _RETRY_CLEARS = (
     "lease",
 )
 
+# Rows written before job kinds existed have no kind; they are RADAR jobs.
+_KIND_SQL = "COALESCE(json_extract(payload, '$.kind'), 'radar')"
+
 
 class IllegalTransition(ValueError):
     pass
@@ -262,8 +265,10 @@ class Database:
         return Job.model_validate_json(rows[0][0]) if rows else None
 
     def list_jobs(
-        self, state: JobState | None = None, scan_id: str | None = None, limit: int = 100
+        self, state: JobState | None = None, scan_id: str | None = None, limit: int = 100,
+        kind: str | None = "radar",
     ) -> list[Job]:
+        """Newest first. Only RADAR jobs unless `kind` names another kind; None means every kind."""
         where, params = [], []
         if state is not None:
             where.append("state = ?")
@@ -271,6 +276,9 @@ class Database:
         if scan_id is not None:
             where.append("scan_id = ?")
             params.append(scan_id)
+        if kind is not None:
+            where.append(f"{_KIND_SQL} = ?")
+            params.append(kind)
         clause = f"WHERE {' AND '.join(where)} " if where else ""
         rows = self._query(
             f"SELECT payload FROM jobs {clause}ORDER BY created_at DESC, rowid DESC LIMIT ?",
@@ -278,9 +286,11 @@ class Database:
         )
         return [Job.model_validate_json(r[0]) for r in rows]
 
-    def jobs_for_scan(self, scan_id: str) -> list[Job]:
+    def jobs_for_scan(self, scan_id: str, kind: str | None = "radar") -> list[Job]:
+        clause, params = ("", ()) if kind is None else (f" AND {_KIND_SQL} = ?", (kind,))
         rows = self._query(
-            "SELECT payload FROM jobs WHERE scan_id = ? ORDER BY created_at DESC, rowid DESC", (scan_id,)
+            f"SELECT payload FROM jobs WHERE scan_id = ?{clause} ORDER BY created_at DESC, rowid DESC",
+            (scan_id, *params),
         )
         return [Job.model_validate_json(r[0]) for r in rows]
 
@@ -298,6 +308,7 @@ class Database:
             rows = con.execute(
                 "SELECT payload FROM jobs WHERE state = 'queued'"
                 " AND json_extract(payload, '$.hold_reason') IS NULL"
+                f" AND {_KIND_SQL} = 'radar'"
                 " ORDER BY created_at, rowid LIMIT 1"
             ).fetchall()
             if not rows:
@@ -308,8 +319,8 @@ class Database:
             self._write_job(con, job, insert=False)
         return job
 
-    def latest_job_for_scan(self, scan_id: str) -> Job | None:
-        jobs = self.list_jobs(scan_id=scan_id, limit=1)
+    def latest_job_for_scan(self, scan_id: str, kind: str | None = "radar") -> Job | None:
+        jobs = self.list_jobs(scan_id=scan_id, limit=1, kind=kind)
         return jobs[0] if jobs else None
 
     def update_job(self, job_id: str, **fields: Any) -> Job:

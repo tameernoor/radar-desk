@@ -17,13 +17,14 @@ from typing import Any
 from radar_desk.chat.llm import LLM, Done, LlmError, OpenAICompatibleLLM, TextDelta, ToolCall
 from radar_desk.chat.prompt import system_prompt
 from radar_desk.chat.providers import StatusCache, llm_configured, provider_spec, unconfigured_message
-from radar_desk.chat.tools import TOOLS, ToolSpec, is_error, openai_tools, run_tool
+from radar_desk.chat.tools import TOOLS, ToolSpec, active_tools, is_error, openai_tools, run_tool
 from radar_desk.chat.wire import Emitter
 from radar_desk.records import ChatExecution, new_id
 
 log = logging.getLogger(__name__)
 
 MAX_LLM_CALLS = 8
+KEEPALIVE_S = 15.0  # an SSE comment this often while a server tool runs, so proxies keep the stream open
 CAP_TEXT = "I stopped after too many tool steps in this conversation. Ask again to continue."
 
 
@@ -102,6 +103,17 @@ def _tool_output_text(output: Any) -> tuple[str, bool]:
     return _text_of(output.get("content")), bool(output.get("isError"))
 
 
+def _notice(spec: ToolSpec | None, services: Any, arguments: Any) -> str | None:
+    """The tool's line for the chat before it runs (such as a cold start), or None. Never raises."""
+    if spec is None or spec.notice is None or not isinstance(arguments, dict):
+        return None
+    try:
+        return spec.notice(services, arguments)
+    except Exception:
+        log.exception("chat: the notice of tool %s failed", spec.name)
+        return None
+
+
 class ChatAgent:
     def __init__(
         self,
@@ -111,11 +123,13 @@ class ChatAgent:
         max_llm_calls: int = MAX_LLM_CALLS,
         emitter_options: dict | None = None,
         status: StatusCache | None = None,
+        keepalive_s: float = KEEPALIVE_S,
     ) -> None:
         self.services = services
         self.status = status if status is not None else StatusCache(services.settings)
         self.llm = llm
         self.tools = tools
+        self.keepalive_s = keepalive_s
         self.max_llm_calls = max_llm_calls
         self.emitter_options = emitter_options or {}
         self._server_names = {t.name for t in tools}
@@ -204,7 +218,8 @@ class ChatAgent:
             page_names = {
                 t["name"] for t in ex.client_tools if isinstance(t.get("name"), str)
             } - self._server_names
-            tool_specs = openai_tools(self.tools) + _client_tool_specs(ex.client_tools, self._server_names)
+            offered = active_tools(self.services, self.tools)
+            tool_specs = openai_tools(offered) + _client_tool_specs(ex.client_tools, self._server_names)
             while True:
                 if _llm_calls_so_far(messages) >= self.max_llm_calls:
                     yield emitter.text_delta(CAP_TEXT)
@@ -238,10 +253,19 @@ class ChatAgent:
                     if call.name in page_names:
                         page_calls.append(call)
                         continue
+                    note = _notice(next((t for t in self.tools if t.name == call.name), None),
+                                   self.services, call.arguments)
+                    if note:
+                        yield emitter.text_delta(note + "\n\n")
                     yield emitter.tool_start(call.id, call.name, call.arguments)
-                    result = await asyncio.to_thread(
-                        run_tool, self.services, call.name, call.arguments, self.tools
-                    )
+                    task = asyncio.ensure_future(asyncio.to_thread(
+                        run_tool, self.services, call.name, call.arguments, offered
+                    ))
+                    while not task.done():
+                        await asyncio.wait({task}, timeout=self.keepalive_s)
+                        if not task.done():
+                            yield ": keepalive\n\n"
+                    result = task.result()
                     yield emitter.tool_complete(call.id, not is_error(result), result)
                     messages.append(
                         {"role": "tool", "tool_call_id": call.id, "content": json.dumps(result, ensure_ascii=False)}

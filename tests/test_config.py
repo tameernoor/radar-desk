@@ -10,7 +10,7 @@ from radar_desk.config import ConfigError, Settings, load_settings
 ENV_NAMES = [
     "OWNER_TOKEN", "SESSION_SECRET", "GPU_BACKEND", "MAX_UPLOAD_BYTES", "GPU_MONTHLY_BUDGET_USD",
     "RADAR_GPU", "MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET", "LLM_PROVIDER", "LLM_API_KEY", "LLM_BASE_URL", "DATA_DIR", "CHAT_MODEL",
-    "STORAGE_BACKEND", "MODAL_DATA_VOLUME", "S3_BUCKET", "WORKER_LEASE_S",
+    "STORAGE_BACKEND", "MODAL_DATA_VOLUME", "S3_BUCKET", "WORKER_LEASE_S", "NVREASON_ENABLED",
     "WORKER_IMAGE", "WORKER_PUBLIC_URL", "WORKER_TUNNEL", "RUNPOD_API_KEY", "RUNPOD_VOLUME_ID",
     "RUNPOD_REGISTRY_AUTH_ID", "RUNPOD_DATACENTER", "RUNPOD_MAX_POD_HOURS",
     "RUNPOD_START_TIMEOUT_S", "RUNPOD_GPUS", "RADAR_POD_IDLE_DELETE_S", "RADAR_POD_APP_LOST_DELETE_S",
@@ -53,6 +53,7 @@ def test_loads_from_env_file(tmp_path: Path):
     s = load_settings(_env_file=env)
     assert s.gpu_list == ["L4", "A10"]
     assert s.gpu_monthly_budget_usd == 25.0
+    assert s.nvreason_enabled is False
     assert s.chat_model is None  # empty means unset
 
 

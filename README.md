@@ -1,6 +1,6 @@
 # radar-desk
 
-Runs RADAR (Alibaba DAMO Academy's abdominal CT model, Science 2026) on a CT scan. Shows the 146 finding scores next to the image with RADAR's organ outlines, plus a chat that explains the scores and moves the viewer.
+Runs RADAR (Alibaba DAMO Academy's abdominal CT model, Science 2026) on a CT scan. Shows the 146 finding scores next to the image with RADAR's organ outlines, plus a chat that explains the scores and moves the viewer. Optionally, NVIDIA's NV-Reason-CT reads the same scan and writes its own report, shown next to RADAR's scores and the radiologist's report.
 
 Research use only. Not a medical device.
 
@@ -9,6 +9,9 @@ Research use only. Not a medical device.
 ## Use
 
 - Upload a `.nii` / `.nii.gz` scan and press Score.
+- Add the radiologist's report from the scan bar ("Add report": paste it or choose a `.txt` file). Optional.
+- NV-Reason-CT findings tab: NV-Reason-CT's impression on top, then every finding grouped by what the radiologist's report, RADAR and NV-Reason-CT say about it, into where they disagree (one says present, another absent), what NV-Reason-CT found, what only the others found, and what lies outside NV-Reason-CT's view. Click a finding to jump to the organ and read each one's own words. RADAR counts as present at the display line set on the RADAR findings tab. The attached report and NV-Reason-CT's report are read by the chat model you set in `CHAT_MODEL`, so the grouping needs one. "NV's view" in the viewer draws the part of the scan NV-Reason-CT reads. "Open reports" puts both full reports side by side in a window of their own, with NV-Reason-CT's reasoning and every answer it gave.
+- Ask NV-Reason-CT: press a prepared question in the NV-Reason-CT findings tab, or ask in the chat. The first question after a few idle minutes takes about 2 minutes while the model wakes up; follow-ups take seconds.
 - Click a finding or organ to jump to it.
 - `w` what am I looking at · `m` main + reference views · `f` focus mode · `1`-`5` window presets · `+` `-` zoom.
 - Light panel: window/level in HU, gamma, invert, colour map.
@@ -27,6 +30,7 @@ uv sync
 cd web && npm install && npm run build && cd ..
 cp .env.example .env        # fill in the settings it lists
 set -a && source .env && set +a && uv run modal deploy worker/modal_app.py   # Modal mode only
+set -a && source .env && set +a && uv run modal deploy worker/nvreason_app.py   # optional second reader, Modal mode only
 uv run python -m radar_desk  # http://127.0.0.1:8000, log in with OWNER_TOKEN
 ```
 
@@ -81,6 +85,10 @@ Own GPU: needs a 24 GB NVIDIA card. Tested on RunPod 4090 and L4 (same image), n
 
 New worker version: merge, tag `worker-vX.Y`, push the tag, set `WORKER_IMAGE=...:X.Y`. Then restart the app (pods), `scripts/runpod_endpoint.py update` (serverless), `modal deploy worker/modal_app.py` (Modal).
 
+NV-Reason-CT (optional, Modal mode only): NVIDIA's CT model writes its own report of each scan, as a second reader next to RADAR. Deploy `worker/nvreason_app.py` (line above) and set `NVREASON_ENABLED=1`. Scoring a scan then also starts one NV-Reason-CT report on an L4, about 2 minutes including the model load. The first run downloads the model (10.6 GB) into the Modal Volume `nvreason-hf-cache`.
+
+How NV-Reason-CT reads a scan: it sees a 384 mm cube at 2 mm resolution, placed on the abdomen from the base of the lungs down, so the lower pelvis can fall partly outside it. "NV's view" in the viewer shows the cube, and findings in organs mostly outside it are marked. After its report, the chat model reads that report and the radiologist's as a reading radiologist would, and writes follow-up questions NV-Reason-CT can answer about what it sees. The questions never tell it what the report or RADAR said. They are sent only when you press one, on the same L4, which stays up for 5 minutes after the last call and then stops. NV-Reason-CT counts against `GPU_MONTHLY_BUDGET_USD` like RADAR.
+
 ## Results
 
 | Check | Result |
@@ -98,3 +106,5 @@ New worker version: merge, tag `worker-vX.Y`, push the tag, set `WORKER_IMAGE=..
 ## Licence
 
 CC BY-NC-SA 4.0 (includes and adapts RADAR's code). Model and weights by Alibaba DAMO Academy, [huggingface.co/radar-generalist/RADAR](https://huggingface.co/radar-generalist/RADAR). Paper: Science 393(6817), eaec6129, doi [10.1126/science.aec6129](https://doi.org/10.1126/science.aec6129). See `LICENSE` and `THIRD_PARTY_LICENSES.md`.
+
+NV-Reason-CT by NVIDIA, [huggingface.co/nvidia/NV-Reason-CT](https://huggingface.co/nvidia/NV-Reason-CT), OpenMDW-1.1 licence, for research and educational use only. Paper: arXiv [2609.27511](https://arxiv.org/abs/2609.27511). The model is downloaded when it first runs, not included here.

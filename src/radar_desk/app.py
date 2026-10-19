@@ -31,6 +31,7 @@ from radar_desk.routes import (
     health,
     jobs,
     local_storage,
+    readers,
     results,
     scans,
     uploads,
@@ -118,7 +119,7 @@ def create_app(settings: Any = None, services: Services | None = None, start_pol
             parts.append(f"{where}: {err.get('msg')}" if where else str(err.get("msg")))
         return JSONResponse({"detail": "; ".join(parts) or "invalid request"}, status_code=422)
 
-    for module in (health, auth, uploads, scans, jobs, results, export, gpu, catalog, fixtures, chat, worker,
+    for module in (health, auth, uploads, scans, readers, jobs, results, export, gpu, catalog, fixtures, chat, worker,
                    workers, compute):
         app.include_router(module.router)
     if isinstance(services.storage, LocalStorage):

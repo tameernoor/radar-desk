@@ -5,6 +5,8 @@ Run with the same environment as the app (or a .env in the working directory), w
     .venv/bin/python scripts/seed_dev.py
 
 Prints the scan id and the job id. The workspace is then at /workspace.html?scan=<scan id>.
+With --readers (and NVREASON_ENABLED=1) the scan also gets a synthetic report, a finished fake NV-Reason-CT job
+and scripted reads.
 With --if-empty it does nothing when a finished job already exists (the Playwright web server uses this).
 Run it before the server starts: the fake backend keeps its calls in memory, so a running server's poller
 would fail a job this script submitted.
@@ -48,9 +50,37 @@ def synthetic_scan() -> bytes:
     return gzip.compress(img.to_bytes())
 
 
+def seed_readers(services, scan_id: str) -> None:
+    """A synthetic report, the finished fake NV job and the reads, from a scripted model. No chat model is called,
+    here or later: the running app (without CHAT_MODEL) finds every read up to date."""
+    from fake_llm import ScriptedLLM
+    from readers_seed import SYNTHETIC_REPORT, scripted_replies
+
+    if not services.settings.nvreason_enabled:
+        sys.exit("seed_dev: --readers needs NVREASON_ENABLED=1")
+    services.scans.put_report(scan_id, SYNTHETIC_REPORT)
+    services.nvreason.ensure_job(scan_id)
+    poller = Poller(services)
+    for _ in range(MAX_TICKS):
+        if services.nvreason.latest_done(scan_id) is not None:
+            break
+        poller.tick()
+    if services.nvreason.latest_done(scan_id) is None:
+        sys.exit(f"seed_dev: the fake NV-Reason-CT job did not finish: {services.nvreason.latest(scan_id)}")
+    services.readers.llm = ScriptedLLM(scripted_replies())
+    services.readers.refresh(scan_id)
+    status = services.readers.status(scan_id)
+    if any(s["status"] != "ready" for s in status.values()):
+        sys.exit(f"seed_dev: the reads are not ready: {status}")
+    print(f"readers seeded for {scan_id}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed one synthetic scan with a finished fake job.")
     parser.add_argument("--if-empty", action="store_true", help="skip when a finished job already exists")
+    parser.add_argument("--readers", action="store_true",
+                        help="also attach a synthetic report, finish the fake NV-Reason-CT job and store scripted "
+                             "reads for the Readers tab (needs NVREASON_ENABLED=1)")
     args = parser.parse_args()
     try:
         settings = load_settings()
@@ -83,6 +113,8 @@ def main() -> None:
     if job.state != "done":
         sys.exit(f"seed_dev: job {job.id} ended {job.state}: {job.error}")
 
+    if args.readers:
+        seed_readers(services, scan.id)
     print(f"scan_id {scan.id}")
     print(f"job_id {job.id}")
 

@@ -16,6 +16,7 @@ from .radar.header import Header  # one Header for records and parsing
 ScanState = Literal["uploading", "ready", "rejected"]
 JobState = Literal["queued", "submitted", "done", "failed", "cancelled"]
 TERMINAL_JOB_STATES: tuple[str, ...] = ("done", "failed", "cancelled")
+JobKind = Literal["radar", "nvreason"]
 ChatState = Literal["running", "awaiting", "done", "error"]
 PodPhase = Literal["tunnel", "starting", "ready", "stopped"]
 
@@ -90,6 +91,7 @@ class Job(BaseModel):
     lease: Lease | None = None
     lease_losses: int = 0
     backend: str | None = None  # modal, worker or fake, set at spawn and at claim
+    kind: JobKind = "radar"  # radar scores the scan; nvreason is NV-Reason-CT's report (Readers lens)
 
 
 class PodRecord(BaseModel):

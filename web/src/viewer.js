@@ -109,6 +109,8 @@ export function createViewer(canvas, { onLocation, onLight, onView } = {}) {
     ct: null,
     mask: null,
     box: null,
+    nvBox: null,
+    nvViewOn: false,
     labels: [], // index = label value, {label, en}
     organByLabel: new Map(), // label value -> scored organ name
     isolated: null, // label value or null
@@ -368,10 +370,12 @@ export function createViewer(canvas, { onLocation, onLight, onView } = {}) {
       await ready;
       state.labels = [...labels].sort((a, b) => a.label - b.label);
       state.organByLabel = new Map(organLabels.map((o) => [o.label, o.organ]));
-      // A newer job replaces the mask (and its scoring box) of an older one.
-      for (const old of [state.box, state.mask]) if (old) nv.removeVolume(old);
+      // A newer job replaces the mask (and its scoring box and NV box) of an older one.
+      for (const old of [state.box, state.nvBox, state.mask]) if (old) nv.removeVolume(old);
       state.box = null;
       state.boxOrgan = null;
+      state.nvBox = null;
+      state.nvViewOn = false;
       state.mask = null;
       const mask = await nv.addVolumeFromUrl({ url, colormap: "gray", opacity: state.maskOn ? state.opacity : 0 });
       state.mask = mask;
@@ -511,6 +515,27 @@ export function createViewer(canvas, { onLocation, onLight, onView } = {}) {
       return true;
     },
 
+    // NV-Reason-CT's crop as a one-voxel shell in its own label volume, drawn like the scoring box.
+    showNvBox(boxMm) {
+      if (!state.mask) return false;
+      if (!boxMm) {
+        state.nvViewOn = false;
+        if (state.nvBox) nv.setOpacity(volumeIndex(state.nvBox), 0);
+        return true;
+      }
+      if (!state.nvBox) {
+        state.nvBox = state.mask.clone();
+        state.nvBox.name = "NV's view";
+        applyLabelColours(state.nvBox, { R: [0, 255], G: [0, 176], B: [0, 32], A: [0, 255], I: [0, 1], labels: ["", "NV's view"] });
+        nv.addVolume(state.nvBox);
+      }
+      fillBox(state.nvBox, boxMm);
+      state.nvViewOn = true;
+      nv.setOpacity(volumeIndex(state.nvBox), 1);
+      nv.updateGLVolume();
+      return true;
+    },
+
     location() {
       const labelName = state.labelValue == null ? null : nameOfLabel(state.labelValue);
       return {
@@ -555,6 +580,7 @@ export function createViewer(canvas, { onLocation, onLight, onView } = {}) {
         outline: state.outline,
         isolated_label: state.isolated,
         scoring_box_organ: state.boxOrgan,
+        nv_view: state.nvViewOn,
         ...api.location(),
       };
     },
